@@ -14,7 +14,6 @@ import time
 
 MOUNT = Path('/drive')
 ROOT = MOUNT / 'icloud'
-MAX_FILES = 2
 MAX_BYTES = 128 * 1024 * 1024
 RATE = '512K'  # Rclone KiB/s: one transfer at a time
 TOTAL_SECONDS = 15 * 60
@@ -62,9 +61,9 @@ def safe_relative_path(value: object) -> Path | None:
     return Path(*path.parts)
 
 
-def plan(entries: list[dict], destination: Path, max_files: int = MAX_FILES,
+def plan(entries: list[dict], destination: Path,
          max_bytes: int = MAX_BYTES) -> tuple[list[tuple[str, int]], int]:
-    """Return bounded new relative file paths, and count of oversized candidates."""
+    """Select missing files up to byte budget, not an artificial file count."""
     selected: list[tuple[str, int]] = []
     total = 0
     oversized = 0
@@ -86,8 +85,6 @@ def plan(entries: list[dict], destination: Path, max_files: int = MAX_FILES,
         if size <= max_bytes - total:
             selected.append((rel.as_posix(), size))
             total += size
-        if len(selected) == max_files:
-            break
     return selected, oversized
 
 
@@ -157,8 +154,11 @@ def run(kind: str, execute: bool) -> int:
         total = sum(size for _, size in selected)
         print(f'{kind}: planned {len(selected)} files / {total} bytes; '
               f'{oversized} oversize candidates observed; mode={"EXECUTE" if execute else "DRY RUN"}')
-        for rel, size in selected:
+        preview_limit = 12
+        for rel, size in selected[:preview_limit]:
             print(f'  {size:>12}  {rel}')
+        if len(selected) > preview_limit:
+            print(f'  ... and {len(selected) - preview_limit} more within the byte budget')
         if not execute:
             print('Dry run only. No files downloaded. Enable timers explicitly after review.')
             return 0

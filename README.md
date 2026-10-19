@@ -45,10 +45,10 @@ Status: systemctl --user list-timers 'apple-sync-*' and journalctl --user -u app
 
 ## Download limits
 
-Every run **scans** one remote, plans at most **two** missing files, then ends. Downloads use rclone copyto on those two specific paths, not rclone sync or an unlimited tree copy. Defaults:
+Every run **scans** one remote, plans missing files within a total payload budget, then ends. There is **no two-file cap**: one run may fetch dozens or hundreds of small files. Downloads use rclone copyto on those two specific paths, not rclone sync or an unlimited tree copy. Defaults:
 
 - **0 files downloaded in manual dry-run mode** (omit --execute).
-- **At most 2 files and 128 MiB of listed source payload per service invocation**; files larger than 128 MiB are deferred, not silently downloaded. Remote sizes are estimates; network traffic can exceed payload because of retries and protocol overhead.
+- **At most 128 MiB of listed source payload per service invocation**, regardless of the number of files. Files larger than 128 MiB are deferred and remain outstanding; a separate bounded large-file approach is needed to archive those. Remote sizes are estimates; network traffic can exceed payload because of retries and protocol overhead.
 - **Maximum 512 KiB/s**, one concurrent transfer, capped at about **15 minutes total** including listing. Rclone is stopped if the deadline expires; an interrupted file may have to start again. The hard time cap means a slow large file can fail repeatedly; no files are considered complete in that case.
 - **No uploads, deletions, or overwrites.** Existing local file paths are skipped. Source deletions never propagate. Changes to a previously archived source file are not captured automatically; historical versioning is future work.
 - Reject symlink destinations, unsafe remote paths and unknown sizes. Fail closed if /drive is not a writable ext4 mount. The two iCloud services share a lock and don't overlap each other.

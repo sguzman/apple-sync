@@ -16,7 +16,7 @@ class PlanTests(unittest.TestCase):
             (dest / 'a').write_text('existing')
             data = [{'Path': 'a', 'Size': 1}, {'Path': 'b', 'Size': 3},
                     {'Path': 'c', 'Size': 2}, {'Path': 'd', 'Size': 2}]
-            chosen, _ = mod.plan(data, dest, max_files=2, max_bytes=5)
+            chosen, _ = mod.plan(data, dest, max_bytes=5)
             self.assertEqual(chosen, [('b', 3), ('c', 2)])
 
     def test_oversized_deferred_and_path_guarded(self):
@@ -26,9 +26,19 @@ class PlanTests(unittest.TestCase):
             data = [{'Path': '../bad', 'Size': 1}, {'Path': '/bad', 'Size': 1},
                     {'Path': 'big', 'Size': 101}, {'Path': 'okay', 'Size': 4},
                     {'Path': 'unknown', 'Size': -1}]
-            chosen, over = mod.plan(data, dest, max_files=2, max_bytes=100)
+            chosen, over = mod.plan(data, dest, max_bytes=100)
             self.assertEqual(chosen, [('okay', 4)])
             self.assertEqual(over, 1)
+
+    def test_many_small_files_in_one_hour(self):
+        from tempfile import TemporaryDirectory
+        with TemporaryDirectory() as temp:
+            dest = pathlib.Path(temp)
+            data = [{'Path': f'item-{i:03d}.jpg', 'Size': 1} for i in range(100)]
+            chosen, oversized = mod.plan(data, dest, max_bytes=80)
+            self.assertEqual(len(chosen), 80)
+            self.assertEqual(sum(size for _, size in chosen), 80)
+            self.assertEqual(oversized, 0)
 
     def test_symlink_parent_skipped(self):
         from tempfile import TemporaryDirectory
