@@ -1,0 +1,9 @@
+# Never place Apple credentials, downloaded archives, logs, or local state in Git.
+rclone.conf
+.env
+*.log
+__pycache__/
+*.pyc
+state/
+photos/
+drive/

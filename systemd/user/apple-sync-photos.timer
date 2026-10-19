@@ -1,0 +1,11 @@
+[Unit]
+Description=Run bounded iCloud Photos archive hourly
+
+[Timer]
+OnCalendar=*-*-* *:40:00
+Persistent=false
+AccuracySec=1min
+Unit=apple-sync-photos.service
+
+[Install]
+WantedBy=timers.target

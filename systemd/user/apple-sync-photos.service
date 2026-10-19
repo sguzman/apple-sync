@@ -1,0 +1,10 @@
+[Unit]
+Description=Apple Sync bounded iCloud Photos downstream archive
+ConditionPathIsMountPoint=/drive
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/apple-sync-batch photos --execute
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=20min
