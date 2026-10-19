@@ -43,18 +43,20 @@ To pause:
 
 Status: systemctl --user list-timers 'apple-sync-*' and journalctl --user -u apple-sync-photos.service -n 50 --no-pager.
 
-## Download limits
+## Download budgets and persistent resumption
 
-Every run **scans** one remote, plans missing files within a total payload budget, then ends. There is **no two-file cap**: one run may fetch dozens or hundreds of small files. Downloads use rclone copyto on those two specific paths, not rclone sync or an unlimited tree copy. Defaults:
+The two independent hourly jobs remain **disabled until explicitly enabled**. A run scans the relevant remote, then advances files using read-only rclone byte-range requests. It does not rely on interrupted rclone copy files resuming automatically.
 
-- **0 files downloaded in manual dry-run mode** (omit --execute).
-- **At most 128 MiB of listed source payload per service invocation**, regardless of the number of files. Files larger than 128 MiB are deferred and remain outstanding; a separate bounded large-file approach is needed to archive those. Remote sizes are estimates; network traffic can exceed payload because of retries and protocol overhead.
-- **Maximum 512 KiB/s**, one concurrent transfer, capped at about **15 minutes total** including listing. Rclone is stopped if the deadline expires; an interrupted file may have to start again. The hard time cap means a slow large file can fail repeatedly; no files are considered complete in that case.
-- **No uploads, deletions, or overwrites.** Existing local file paths are skipped. Source deletions never propagate. Changes to a previously archived source file are not captured automatically; historical versioning is future work.
-- Reject symlink destinations, unsafe remote paths and unknown sizes. Fail closed if /drive is not a writable ext4 mount. The two iCloud services share a lock and don't overlap each other.
-- **Drive timer at :10 and Photos timer at :40 hourly**, timers disabled until explicitly enabled. Existing Google Drive service is not modified; its traffic can coexist with iCloud, so consider aggregate bandwidth before enabling.
-
-**Coverage caveat:** the currently implemented bounded scanner re-enumerates the source on every run. For very large photo libraries, listing may be slow even without downloading media. Oversized files, incomplete Apple API listings and shared library contents need follow-up coverage before an archive can be called complete.
+- **128 MiB maximum requested payload per hourly pass**, unlimited number of small files within that byte budget.
+- **512 KiB/s rclone transfer cap**; eight-MiB source byte-range chunks.
+- **15-minute maximum execution time** including listing.
+- **No maximum file size:** a 2-GiB video is staged in 128-MiB hourly installments and atomically published only after complete. When a run stops, completed chunks remain under /drive/icloud/.apple-sync-state; the next run checks the last chunk's SHA-256 and resumes at the recorded byte offset.
+- Both remotes share a non-overlap lock; previously started large transfers are prioritized over new files.
+- Final archive files cannot be overwritten or deleted by this downloader. Remote deletions never propagate.
+- The script refuses to resume a changed source if listed size, timestamp, ID or hashes differ from the saved metadata. Such partials are retained for manual resolution.
+- Network traffic includes protocol overhead and can exceed the requested payload cap. A failed chunk is not counted as durable progress and ends that run.
+- **Live end-to-end validation is still needed.** Rclone's iCloud Photos backend is experimental; whether byte-range requests work correctly for the actual Apple file URLs must be verified before enabling schedules. The Apple API may also omit items from listings. Source hashes are not always available, so full end-to-end cryptographic verification is not always possible.
+- Timers are staggered at :10 (Drive) and :40 (Photos), but the separate Google Drive downloader might still overlap. Do not enable the new timers until total bandwidth is reviewed.
 
 ## Development
 
