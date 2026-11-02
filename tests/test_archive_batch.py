@@ -11,6 +11,15 @@ spec.loader.exec_module(mod)
 
 
 class ChunkTests(unittest.TestCase):
+    def test_favorites_uses_independent_album_archive(self):
+        remote, destination = mod.SOURCES['photos-favorites']
+        self.assertEqual(remote, 'icloudphotos:PrimarySync/Favorites')
+        self.assertEqual(destination, mod.ROOT / 'photos' / 'albums' / 'Favorites')
+        self.assertNotEqual(destination, mod.SOURCES['photos'][1])
+        self.assertNotEqual(
+            mod.key_for('photos-favorites', 'sample.HEIC'),
+            mod.key_for('photos', 'sample.HEIC'))
+
     def test_path_safety(self):
         for bad in ('../evil', '/absolute', 'x//y', 'x/./y', 'x/../y', '', 'a\npath'):
             self.assertIsNone(mod.safe_path(bad))
