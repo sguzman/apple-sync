@@ -41,6 +41,20 @@ class ChunkTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 mod.read_state(part, meta, {**entry, 'Size': 101})
 
+    def test_dry_run_does_not_truncate_uncommitted_tail(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            part, meta = mod.state_paths(root, 'drive', 'example.bin')
+            part.parent.mkdir(parents=True)
+            entry = {'Path': 'example.bin', 'Size': 100, 'ModTime': 'stable'}
+            state = mod.new_state(entry)
+            part.write_bytes(b'uncommitted bytes')
+            mod.write_json_atomic(meta, state)
+            with self.assertRaises(RuntimeError):
+                mod.read_state(part, meta, entry, repair=False)
+            self.assertEqual(part.read_bytes(), b'uncommitted bytes')
+            self.assertEqual(json.loads(meta.read_text())['committed'], 0)
+
     def test_candidate_keeps_large_and_prioritizes_partial(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
