@@ -25,6 +25,10 @@ LIST_SECONDS = 5 * 60
 SOURCES = {
     'drive': ('icloud:', ROOT / 'drive'),
     'photos': ('icloudphotos:PrimarySync/All Photos', ROOT / 'photos' / 'primary'),
+    # Small built-in album for live archive validation without the full-library scan.
+    # This is a separate, real album archive, NOT a complete Photos backup.
+    'photos-favorites': ('icloudphotos:PrimarySync/Favorites',
+                         ROOT / 'photos' / 'albums' / 'Favorites'),
 }
 
 
