@@ -217,6 +217,11 @@ def candidates(entries: list[dict], destination: Path, state_root: Path,
 
 
 def run(kind: str, execute: bool) -> int:
+    # Recent live probes found inconsistent byte-range reads on iCloud Drive.
+    # Fail closed until a verified strategy replaces this temporary guard.
+    if execute and kind == 'drive':
+        fail('iCloud Drive range downloads are not verified; refusing archive '
+             'execution until the range mismatch is diagnosed')
     source, destination = SOURCES[kind]
     safe_directory(destination)
     configured = subprocess.run(['rclone', 'listremotes'], check=True,
