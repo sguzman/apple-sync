@@ -74,7 +74,7 @@ def new_state(entry: dict) -> dict:
             'committed': 0, 'last_start': 0, 'last_length': 0, 'last_sha256': None}
 
 
-def read_state(part: Path, meta: Path, entry: dict) -> dict:
+def read_state(part: Path, meta: Path, entry: dict, *, repair: bool = True) -> dict:
     if part.is_symlink() or meta.is_symlink():
         fail(f'Refusing symlink state {part}')
     if part.exists() != meta.exists():
@@ -91,6 +91,9 @@ def read_state(part: Path, meta: Path, entry: dict) -> dict:
     if actual < committed:
         fail(f'Partial shortened unexpectedly: {part}')
     if actual > committed:
+        # Never change checkpoint data while inspecting the archive.
+        if not repair:
+            fail(f'Partial has an uncommitted tail; dry run leaves it untouched: {part}')
         # A crash between appending bytes and committing the manifest: discard only
         # the uncommitted tail. The previously committed prefix is preserved.
         with part.open('r+b') as stream:
@@ -192,7 +195,7 @@ def finish(part: Path, meta: Path, destination: Path, rel: Path, expected: int) 
 
 
 def candidates(entries: list[dict], destination: Path, state_root: Path,
-               kind: str) -> list[dict]:
+               kind: str, *, repair: bool = True) -> list[dict]:
     selected = []
     for entry in entries:
         rel = safe_path(entry.get('Path'))
@@ -204,7 +207,7 @@ def candidates(entries: list[dict], destination: Path, state_root: Path,
             continue
         part, meta = state_paths(state_root, kind, rel.as_posix())
         try:
-            current = read_state(part, meta, entry)
+            current = read_state(part, meta, entry, repair=repair)
         except (OSError, RuntimeError, ValueError, TypeError) as error:
             print(f'DEFER: {rel}: {error}', file=sys.stderr, flush=True)
             continue
@@ -240,16 +243,24 @@ def run(kind: str, execute: bool) -> int:
 def preview(kind: str, source: str, destination: Path, state_root: Path,
             execute: bool) -> int:
     started = time.monotonic()
-    listing = subprocess.run(['rclone', 'lsjson', source, '--recursive',
-                              '--files-only', '--checkers', '1', '--tpslimit', '2'],
-                             capture_output=True, text=True, timeout=LIST_SECONDS,
-                             check=False)
+    print(f'{kind}: listing {source} recursively (up to {LIST_SECONDS // 60} minutes); '
+          'no downloads until listing completes', flush=True)
+    try:
+        listing = subprocess.run(['rclone', 'lsjson', source, '--recursive',
+                                  '--files-only', '--checkers', '1', '--tpslimit', '2'],
+                                 capture_output=True, text=True, timeout=LIST_SECONDS,
+                                 check=False)
+    except subprocess.TimeoutExpired:
+        fail(f'{kind}: listing timed out after {LIST_SECONDS} seconds; '
+             'no downloads attempted')
     if listing.returncode:
         fail(f'Unable to list {kind}; no downloads attempted (exit {listing.returncode})')
     entries = json.loads(listing.stdout)
     if not isinstance(entries, list):
         fail('Unexpected listing format')
-    todo = candidates(entries, destination, state_root, kind)
+    print(f'{kind}: listed {len(entries)} file entries in '
+          f'{time.monotonic() - started:.1f}s; checking local progress', flush=True)
+    todo = candidates(entries, destination, state_root, kind, repair=execute)
     print(f'{kind}: {len(todo)} missing/in-progress files; per-run budget '
           f'{MAX_BYTES // (1024 * 1024)} MiB, {RUN_SECONDS // 60} min; '
           f'{"EXECUTE" if execute else "DRY RUN"}')
