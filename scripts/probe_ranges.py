@@ -40,7 +40,8 @@ def candidates(entries: object) -> list[dict]:
              valid_path(e.get('Path')) and
              type(e.get('Size')) is int and
              2 <= e['Size'] <= MAX_FILE_BYTES and not e.get('IsDir', False)]
-    return sorted(found, key=lambda e: (e['Size'], e['Path']))
+    # Prefer a meaningful nontrivial overlap when a directory also has tiny files.
+    return sorted(found, key=lambda e: (e['Size'] < 4096, e['Size'], e['Path']))
 
 
 def run_rclone(args: list[str], seconds: int) -> subprocess.CompletedProcess:
