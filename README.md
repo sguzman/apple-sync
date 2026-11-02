@@ -56,6 +56,36 @@ To pause:
 
 Status: systemctl --user list-timers 'apple-sync-*' and journalctl --user -u apple-sync-photos.service -n 50 --no-pager.
 
+## First live Photos archive: bounded Favorites album
+
+The initial `photos --execute` attempt on 2026-11-02 stopped after five
+minutes of listing `PrimarySync/All Photos` (16,563 reported items); **no
+downloads were attempted**. Rclone's iCloud Photos backend documents that
+initial scans of large albums require expensive pagination and can benefit
+from its local disk cache after a complete scan.
+
+To validate the actual **archive write and resumption** pipeline without
+waiting for a complete All Photos inventory, the script additionally supports:
+
+    git pull --ff-only
+    bash scripts/install.sh
+    python3 -m unittest discover -s tests -v
+    timeout 1000s python3 scripts/archive_batch.py photos-favorites --execute
+
+The small built-in Favorites album was confirmed in the user's Apple Photos
+library during reconnaissance. This archive uses the same byte-range,
+checksum, lock and no-overwrite implementation as the full Photos archive;
+it writes only to `/drive/icloud/photos/albums/Favorites` and separate
+checkpoint state. It has the same 128 MiB/15-minute pass limits and will
+retain partial transfers. It does **not** enable timers.
+
+A Favorites archive is **not** a backup of All Photos. Albums can contain
+copies of assets also found in All Photos; this path is deliberately
+separate to preserve album membership and may consume duplicate storage.
+After a real small-album archive passes, rework the full-library first
+scan to allow its initial cache warmup and validate the canonical path.
+Never report the entire photo library as archived based on an album pass.
+
 ## Current iCloud Drive range-verification blocker (2026-11-02)
 
 A live rclone v1.75.2 probe reported **overlapping bytes disagree** for an
