@@ -27,10 +27,23 @@ Clone this repository locally, then:
 
 Installer requires /drive to be mounted ext4, creates only archive directories, and symlinks the script and units into ~/.local/bin and ~/.config/systemd/user. It refuses to overwrite unrelated unit files. **It never enables or starts either timer.**
 
-Before enabling anything, inspect a read-only plan:
+Before enabling anything, update your local checkout and run offline tests:
+
+    git pull --ff-only
+    python3 -m unittest discover -s tests -v
+
+Then probe **actual read-only source bytes** without publishing any archive files:
+
+    python3 scripts/probe_ranges.py both
+
+The probe looks only in a handful of small iCloud Drive folders and Photos albums, reads up to 16 KiB twice with overlapping offsets, checks exact lengths and overlap, and does not print filenames or file contents. It skips candidates larger than 16 MiB, since some backends may fetch more than the requested range internally. It reports PASS only when the range behavior is consistent; FAIL or INCONCLUSIVE means **do not enable the timers**. This is not end-to-end archive validation.
+
+After the range probes pass, inspect a read-only full inventory plan (the first scan can take up to five minutes, especially for Photos):
 
     ~/.local/bin/apple-sync-batch drive
     ~/.local/bin/apple-sync-batch photos
+
+Both inventory commands print an immediate scan-start message. Dry-run mode never repairs partial data; corrupt or uncommitted staging state is reported for manual review.
 
 When ready **and only after both remote configurations and the plans are reviewed**, explicitly opt in:
 
