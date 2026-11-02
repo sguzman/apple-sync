@@ -106,8 +106,13 @@ def probe(kind: str) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('kind', choices=SCOPES)
-    return probe(parser.parse_args().kind)
+    parser.add_argument('kind', choices=(*SCOPES, 'both'))
+    kind = parser.parse_args().kind
+    if kind == 'both':
+        drive_status = probe('drive')
+        photos_status = probe('photos')
+        return max(drive_status, photos_status)
+    return probe(kind)
 
 
 if __name__ == '__main__':
