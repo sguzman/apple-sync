@@ -56,6 +56,29 @@ To pause:
 
 Status: systemctl --user list-timers 'apple-sync-*' and journalctl --user -u apple-sync-photos.service -n 50 --no-pager.
 
+## Current iCloud Drive range-verification blocker (2026-11-02)
+
+A live rclone v1.75.2 probe reported **overlapping bytes disagree** for an
+iCloud Drive file, while the iCloud Photos sample passed. This does not yet
+prove whether the problem is backend-wide, file-specific, or a changing source.
+
+**Drive archive execution is temporarily blocked in code.** The Photos archive
+is also not yet approved for unattended operation. Do not enable timers.
+
+To classify the Drive failure without modifying the remote or archive:
+
+    git pull --ff-only
+    python3 -m unittest discover -s tests -v
+    timeout 210s python3 scripts/diagnose_drive_ranges.py
+
+The diagnosis reads three small ranges (offsets 0, 1, 0) from each of up to
+three different small files. It checks whether a repeated identical range is
+stable, whether the shifted range matches, and whether an offset was apparently
+ignored. It outputs only status categories and sample counts, not filenames,
+secrets, or file data. A pass across samples is **not** validation for every
+iCloud Drive file or permission to enable unattended archiving. The downloader
+must remain blocked until a robust approach is implemented and live-tested.
+
 ## Download budgets and persistent resumption
 
 The two independent hourly jobs remain **disabled until explicitly enabled**. A run scans the relevant remote, then advances files using read-only rclone byte-range requests. It does not rely on interrupted rclone copy files resuming automatically.
