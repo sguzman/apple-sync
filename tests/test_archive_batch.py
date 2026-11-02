@@ -41,6 +41,10 @@ class ChunkTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 mod.read_state(part, meta, {**entry, 'Size': 101})
 
+    def test_drive_execution_blocked_until_ranges_verified(self):
+        with self.assertRaisesRegex(RuntimeError, 'range downloads are not verified'):
+            mod.run('drive', execute=True)
+
     def test_dry_run_does_not_truncate_uncommitted_tail(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
