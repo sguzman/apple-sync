@@ -6,7 +6,7 @@ bin_dir="$HOME/.local/bin"
 
 [[ "$(findmnt -n --mountpoint /drive -o FSTYPE)" == 'ext4' ]] || { echo '/drive must be mounted ext4' >&2; exit 1; }
 [[ ! -L /drive/icloud ]] || { echo 'Refusing symlink /drive/icloud' >&2; exit 1; }
-mkdir -p /drive/icloud/drive /drive/icloud/photos/primary /drive/icloud/photos/shared /drive/icloud/exports /drive/icloud/manifests /drive/icloud/logs
+mkdir -p /drive/icloud/drive /drive/icloud/photos/primary /drive/icloud/photos/shared /drive/icloud/photos/albums/Favorites /drive/icloud/exports /drive/icloud/manifests /drive/icloud/logs
 mkdir -p "$unit_dir" "$bin_dir"
 link_safe() {
   local source="$1" target="$2"
