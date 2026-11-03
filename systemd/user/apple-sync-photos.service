@@ -4,7 +4,7 @@ ConditionPathIsMountPoint=/drive
 
 [Service]
 Type=oneshot
-ExecStart=%h/.local/bin/apple-sync-batch photos --execute
+ExecStart=%h/.local/bin/apple-sync-batch photos --execute --defer-while-google
 Nice=10
 IOSchedulingClass=idle
 TimeoutStartSec=20min
