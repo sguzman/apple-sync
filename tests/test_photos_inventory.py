@@ -157,9 +157,11 @@ class PhotosInventoryTests(unittest.TestCase):
                                  return_value=subprocess.CompletedProcess(
                                      [], 0, 'icloudphotos:\n', '')), \
                     patch.object(batch.photos_inventory, 'refresh',
-                                 return_value=(42, 123456)) as refreshed:
+                                 side_effect=lambda target, remote:
+                                 inventory.save(target, remote, [entry('photo.HEIC', 123456)])) as refreshed:
                 self.assertEqual(batch.run('photos-inventory', True), 0)
             refreshed.assert_called_once_with(state, SOURCE)
+            self.assertEqual(inventory.load(state, SOURCE)[1], 123456)
 
 
 if __name__ == '__main__':
