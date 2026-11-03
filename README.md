@@ -7,7 +7,8 @@ Linux-first, **download-only**, controlled iCloud archival using local rclone re
 | Service | rclone source | Local destination | systemd timer |
 | --- | --- | --- | --- |
 | iCloud Drive | icloud: | /drive/icloud/drive | apple-sync-drive.timer |
-| iCloud Photos primary library | icloudphotos:PrimarySync/All Photos | /drive/icloud/photos/primary | apple-sync-photos.timer (NOT READY) |
+| iCloud Photos primary library | icloudphotos:PrimarySync/All Photos | /drive/icloud/photos/primary | apple-sync-photos.timer (disabled pending validation) |
+| Full Photos metadata inventory | icloudphotos:PrimarySync/All Photos | /drive/icloud/.apple-sync-state/photos-primary-inventory.json | apple-sync-photos-inventory.timer (disabled pending validation) |
 | Incremental built-in album subset | Selects one built-in album per pass | /drive/icloud/photos/albums/<album> | apple-sync-photos-progress.timer (opt-in, after testing) |
 
 The Photos path uses **All Photos** to archive original assets without duplicating each photo once for every album where it appears. Preservation of Apple albums/edits/extra metadata, shared libraries, and independent verification are separate future tasks; one path alone is not a complete Apple Photos export. An empty library or a changed API hierarchy can require adjusting the source path.
@@ -44,11 +45,16 @@ After the range probes pass, inspect a read-only full inventory plan (the first 
     ~/.local/bin/apple-sync-batch drive
     ~/.local/bin/apple-sync-batch photos
 
-Both inventory commands print an immediate scan-start message. Dry-run mode never repairs partial data; corrupt or uncommitted staging state is reported for manual review.
+Drive and individual-album commands still list their sources. The full Photos
+worker now requires a private, recently refreshed inventory; use
+`photos-inventory --execute` to create it. Dry-run mode never repairs
+partial data; corrupt or uncommitted staging state is reported for manual
+review.
 
-When ready **and only after both remote configurations and the plans are reviewed**, explicitly opt in:
-
-    systemctl --user enable --now apple-sync-drive.timer apple-sync-photos.timer
+Do **not** enable the Drive and full-Photos timers together on the basis
+of a successful inventory. Drive remains blocked by byte-range issues,
+and full Photos needs a verified first live download. When those distinct
+issues are independently resolved, explicitly opt in to each timer.
 
 To pause:
 
@@ -56,6 +62,75 @@ To pause:
     systemctl --user stop apple-sync-drive.service apple-sync-photos.service
 
 Status: systemctl --user list-timers 'apple-sync-*' and journalctl --user -u apple-sync-photos.service -n 50 --no-pager.
+
+## Full-library Photos: cache-first incremental design (2026-11-03)
+
+The earlier full-library worker gave a cold `All Photos` listing only **300
+seconds**, then stopped before any media downloads. That was our listing
+timeout, not a media transfer failure. The new implementation separates
+remote **metadata discovery** from **media download**:
+
+1. Run `python3 scripts/archive_batch.py photos-inventory --execute --defer-while-google`
+   to build the initial private full-library inventory. This operation gets
+   up to **30 minutes** and downloads **zero photo/video payload bytes**.
+   It writes a complete atomic JSON inventory at
+   `/drive/icloud/.apple-sync-state/photos-primary-inventory.json` (0600).
+   It reports item count and summed file sizes, so we can establish the
+   expected amount of media to archive without downloading the media.
+2. Ordinary `photos --execute --defer-while-google` runs read that local
+   snapshot immediately; they **never issue an All Photos listing**. They
+   compare each listed file against the archive and partial-file checkpoints,
+   download only missing bytes (128 MiB per pass, 512 KiB/s), and resume
+   interrupted large files. Completed local copies remain immutable.
+3. An **opt-in** daily `apple-sync-photos-inventory.timer` refreshes
+   metadata with rclone's native disk cache and lightweight Apple change
+   check. The initial remote listing can be slow; later refreshes should
+   normally reuse rclone's cache. New media is discovered at the next
+   successful inventory refresh, not instantly. A cached manifest older
+   than **48 hours** is refused until refreshed: no stale snapshot is
+   silently treated as an up-to-date source. The separate bounded archive
+   timer is hourly once explicitly enabled after live validation.
+
+The inventory cache never goes into Git. It refuses empty, malformed,
+duplicate-path or unsafe listings; atomic writes prevent partial refreshes
+from replacing the previous completed inventory. If a refresh omits any
+previously inventoried path (whether due to real cloud deletion or an
+incomplete Apple/rclone listing), it stops and keeps the prior inventory
+for review rather than silently dropping those records. No cloud deletions
+are propagated to the local archive. It may therefore require intervention
+after genuine upstream removals or renames.
+
+**Completeness warning:** rclone issue #9955 (September 2026) reports a
+Photos pagination bug where a first pass can miss items despite an
+apparently successful exit. The initial count must be compared against
+the actual Apple Photos library count and spot-checked before enabling
+unattended full backup. A successful inventory, tests, or timer run alone
+does not prove every Apple asset was listed.
+
+Rclone's native photo metadata cache is under
+`~/.cache/rclone/iclouddrive-photos/`; our separate inventory protects
+the bounded downloader from repeated listing timeouts. Neither cache is
+the media archive. The metadata byte total is a **listed** sum: if a
+backend reports wrong sizes, it does not equal verified downloaded bytes.
+
+**Manual validation (full-library and Drive timers remain disabled):**
+
+```fish
+git pull --ff-only
+bash scripts/install.sh
+python3 -m unittest discover -s tests -v
+python3 scripts/archive_batch.py photos-inventory --execute --defer-while-google
+python3 scripts/archive_batch.py photos-inventory
+python3 scripts/archive_batch.py photos
+```
+
+The first inventory may be deferred if the Google Drive service is active.
+Confirm a nonzero item count and plausible total size before trying the
+bounded full-library `photos --execute --defer-while-google` run. Do not
+enable `apple-sync-photos.timer` or `apple-sync-photos-inventory.timer`
+until live tests demonstrate correct source listing, downloaded file
+integrity and coexistence with Google backup. iCloud Drive remains blocked
+by separate byte-range integrity problems.
 
 ## Incremental Photos progress without the full All Photos inventory
 
@@ -125,19 +200,12 @@ needs a reliable first cache build (or a paginated backend), and the
 Drive byte-range failure is unresolved. The progress timer is not a
 substitute for full-library backup.
 
-## Optional full-library cache warmup
+## Legacy full-library warmup command
 
-The rotating worker only covers a subset of albums. To attempt the first
-full All Photos metadata listing separately, run:
-
-    bash scripts/warm_photos_cache.sh
-
-This is an **optional, manual** 30-minute maximum read-only inventory,
-not a media download or a timer. It discards filenames from the terminal.
-Only a *completed* listing can populate rclone's All Photos disk cache.
-Do not run it alongside bandwidth-intensive jobs on a weak connection.
-After successful cache warming, validate a normal full archive pass
-before considering the original `apple-sync-photos.timer`.
+`bash scripts/warm_photos_cache.sh` now invokes the same inventory worker.
+It no longer discards the metadata that it spent time fetching, and it
+never downloads media. Prefer `photos-inventory --execute` above for
+clearer operation and count/size reporting.
 
 ## First live Photos archive: bounded Favorites album
 
@@ -192,7 +260,11 @@ must remain blocked until a robust approach is implemented and live-tested.
 
 ## Download budgets and persistent resumption
 
-The full-library Photos and iCloud Drive timers remain **disabled until explicitly enabled**. The separate incremental album timer is also initially disabled. A run scans the relevant remote, then advances files using read-only rclone byte-range requests. It does not rely on interrupted rclone copy files resuming automatically.
+The full-library Photos, its daily inventory refresh, and iCloud Drive timers
+remain **disabled until explicitly enabled**. The separate incremental
+album timer is installed disabled initially. A full Photos run uses the
+locally cached inventory (not a fresh remote listing), then advances
+missing files using read-only rclone byte-range requests. It does not rely on interrupted rclone copy files resuming automatically.
 
 - **128 MiB maximum requested payload per hourly pass**, unlimited number of small files within that byte budget.
 - **512 KiB/s rclone transfer cap**; eight-MiB source byte-range chunks.
