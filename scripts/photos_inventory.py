@@ -8,6 +8,7 @@ No photo/video contents are downloaded by this module.
 from __future__ import annotations
 
 import json
+from collections import Counter
 import os
 from pathlib import Path
 import subprocess
@@ -36,11 +37,28 @@ def inspect_entries(entries):
         name, size = entry.get('Path'), entry.get('Size')
         if not valid_path(name) or type(size) is not int or size < 0:
             raise RuntimeError('Unsafe path or missing size in All Photos inventory')
-        if name in paths:
-            raise RuntimeError('Duplicate All Photos file path; manual review required')
+        # Apple permits distinct assets with the same visible filename.
+        # Retain ALL entries, including collisions. Downloading by filename
+        # is ambiguous; the archive worker will exclude these paths until
+        # an ID-targeted download mechanism is validated.
         paths.add(name)
         total += size
     return paths, total
+
+
+def unambiguous_entries(entries):
+    """Retain every record in the inventory, but never guess at an ambiguous URL."""
+    counts = Counter(entry['Path'] for entry in entries)
+    safe = [entry for entry in entries if counts[entry['Path']] == 1]
+    conflict_paths = sum(count > 1 for count in counts.values())
+    conflict_records = sum(count for count in counts.values() if count > 1)
+    return safe, conflict_paths, conflict_records
+
+
+def entry_keys(entries):
+    """Reject disappearing IDs on refresh, including colliding assets."""
+    return {(item['Path'], str(item.get('ID'))) if item.get('ID') is not None
+            else (item['Path'], None) for item in entries}
 
 
 def cache_path(state_root):
@@ -78,9 +96,9 @@ def save(state_root: Path, remote: str, entries: list[dict], *, now=None):
         raise RuntimeError('Refusing symlink in Photos inventory destination')
     if path.exists():
         old, _ = load(state_root, remote, max_age=None)
-        missing = {entry['Path'] for entry in old} - paths
+        missing = entry_keys(old) - entry_keys(entries)
         if missing:
-            raise RuntimeError('Apple Photos listing omitted previously known files; '
+            raise RuntimeError('Apple Photos listing omitted previously known assets; '
                                'previous inventory kept for manual review')
     state_root.mkdir(parents=True, mode=0o700, exist_ok=True)
     fd, temp = tempfile.mkstemp(prefix='.photos-inventory-', dir=state_root)
