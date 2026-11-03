@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import photos_inventory
 
 MOUNT = Path('/drive')
