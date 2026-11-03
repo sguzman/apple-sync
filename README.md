@@ -7,7 +7,8 @@ Linux-first, **download-only**, controlled iCloud archival using local rclone re
 | Service | rclone source | Local destination | systemd timer |
 | --- | --- | --- | --- |
 | iCloud Drive | icloud: | /drive/icloud/drive | apple-sync-drive.timer |
-| iCloud Photos primary library | icloudphotos:PrimarySync/All Photos | /drive/icloud/photos/primary | apple-sync-photos.timer |
+| iCloud Photos primary library | icloudphotos:PrimarySync/All Photos | /drive/icloud/photos/primary | apple-sync-photos.timer (NOT READY) |
+| Incremental built-in album subset | Selects one built-in album per pass | /drive/icloud/photos/albums/<album> | apple-sync-photos-progress.timer (opt-in, after testing) |
 
 The Photos path uses **All Photos** to archive original assets without duplicating each photo once for every album where it appears. Preservation of Apple albums/edits/extra metadata, shared libraries, and independent verification are separate future tasks; one path alone is not a complete Apple Photos export. An empty library or a changed API hierarchy can require adjusting the source path.
 
@@ -55,6 +56,53 @@ To pause:
     systemctl --user stop apple-sync-drive.service apple-sync-photos.service
 
 Status: systemctl --user list-timers 'apple-sync-*' and journalctl --user -u apple-sync-photos.service -n 50 --no-pager.
+
+## Incremental Photos progress without the full All Photos inventory
+
+The full `All Photos` first listing timed out after 300 seconds. **The
+new `photos-progress` worker does not attempt that scan.** Each pass lists
+just one smaller built-in visible album, downloads missing files using the
+existing archive engine, and advances a persistent album cursor. After
+the final album it cycles back to the beginning; new photos in those
+albums are picked up on later passes. A failed album also advances the
+cursor to avoid repeatedly blocking progress; failures are reported.
+
+The initial rotation is Animated, Bursts, Panoramas, Slo-mo, Time-lapse,
+Videos and Favorites. Hidden and Recently Deleted are deliberately
+excluded. The album directories and individual progress checkpoints are
+separate from `photos/primary`. Albums may overlap, and the worker does
+not deduplicate files between albums. **This is only a partial archive of
+selected collections, not a backup of all 16,563 reported All Photos
+items.** The canonical full-library path remains unmodified and disabled.
+
+To exercise one real progress pass from the repository:
+
+    git pull --ff-only
+    bash scripts/install.sh
+    python3 -m unittest discover -s tests -v
+    python3 scripts/archive_batch.py photos-progress
+    timeout 1000s python3 scripts/archive_batch.py photos-progress --execute
+
+The preview does not move the persistent cursor. The execute command
+downloads at most 128 MiB of requested payload at 512 KiB/s, for up to
+15 minutes including scanning, and advances one album after the pass.
+If a file exceeds the budget, its verified chunks stay in per-album
+staging for a future visit. The album cursor lives under
+`/drive/icloud/.apple-sync-state`. It is not stored in Git.
+
+A separate user-systemd `apple-sync-photos-progress.timer` is installed
+**disabled**. Once a live progress pass, restart/resumption, and bandwidth
+coordination with the existing Google Drive downloader have been checked,
+the incremental subset timer can be enabled **independently** of the
+full-library and iCloud Drive timers:
+
+    systemctl --user enable --now apple-sync-photos-progress.timer
+
+Do **not** enable `apple-sync-photos.timer` or
+`apple-sync-drive.timer` yet. The original full-library inventory still
+needs a reliable first cache build (or a paginated backend), and the
+Drive byte-range failure is unresolved. The progress timer is not a
+substitute for full-library backup.
 
 ## First live Photos archive: bounded Favorites album
 
