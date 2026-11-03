@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh private iCloud Photos metadata inventory (no media download)
+ConditionPathIsMountPoint=/drive
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/apple-sync-batch photos-inventory --execute --defer-while-google
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=35min
