@@ -22,7 +22,7 @@ link_safe() {
   ln -sfn "$source" "$target"
 }
 link_safe "$repo_dir/scripts/archive_batch.py" "$bin_dir/apple-sync-batch"
-for kind in drive photos photos-progress; do
+for kind in drive photos photos-progress photos-inventory; do
   for suffix in service timer; do
     link_safe "$repo_dir/systemd/user/apple-sync-$kind.$suffix" "$unit_dir/apple-sync-$kind.$suffix"
   done
