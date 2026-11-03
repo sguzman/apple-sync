@@ -54,17 +54,38 @@ class PhotosInventoryTests(unittest.TestCase):
                 inventory.save(root, SOURCE, [original[0]], now=1001)
             self.assertEqual(inventory.load(root, SOURCE, now=1002)[0], original)
 
-    def test_duplicate_and_invalid_entries_are_rejected(self):
+    def test_colliding_paths_retained_and_excluded_from_name_based_copy(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            for items in ([entry('duplicate'), entry('duplicate')],
-                          [entry('../escape')],
+            originals = [entry('same.HEIC', 100),
+                         {**entry('same.HEIC', 200), 'ID': 'another-asset'},
+                         entry('unique.MOV', 300)]
+            self.assertEqual(inventory.save(root, SOURCE, originals), (3, 600))
+            stored, _ = inventory.load(root, SOURCE)
+            self.assertEqual(stored, originals)
+            safe, conflicting_paths, affected = inventory.unambiguous_entries(stored)
+            self.assertEqual([x['Path'] for x in safe], ['unique.MOV'])
+            self.assertEqual((conflicting_paths, affected), (1, 2))
+
+    def test_invalid_entries_are_rejected(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            for items in ([entry('../escape')],
                           [entry('unknown', -1)],
                           []):
                 with self.subTest(items=items):
                     with self.assertRaises(RuntimeError):
                         inventory.save(root, SOURCE, items)
             self.assertFalse((root / inventory.NAME).exists())
+
+    def test_refresh_rejects_missing_duplicate_asset_id(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            earlier = [entry('same.HEIC'), {**entry('same.HEIC'), 'ID': 'different'}]
+            inventory.save(root, SOURCE, earlier, now=1000)
+            with self.assertRaisesRegex(RuntimeError, 'omitted previously known'):
+                inventory.save(root, SOURCE, [earlier[0]], now=1001)
+            self.assertEqual(inventory.load(root, SOURCE, now=1002)[0], earlier)
 
     def test_refresh_failure_keeps_previous_inventory(self):
         with TemporaryDirectory() as directory:
