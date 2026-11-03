@@ -103,6 +103,20 @@ needs a reliable first cache build (or a paginated backend), and the
 Drive byte-range failure is unresolved. The progress timer is not a
 substitute for full-library backup.
 
+## Optional full-library cache warmup
+
+The rotating worker only covers a subset of albums. To attempt the first
+full All Photos metadata listing separately, run:
+
+    bash scripts/warm_photos_cache.sh
+
+This is an **optional, manual** 30-minute maximum read-only inventory,
+not a media download or a timer. It discards filenames from the terminal.
+Only a *completed* listing can populate rclone's All Photos disk cache.
+Do not run it alongside bandwidth-intensive jobs on a weak connection.
+After successful cache warming, validate a normal full archive pass
+before considering the original `apple-sync-photos.timer`.
+
 ## First live Photos archive: bounded Favorites album
 
 A live `photos --execute` attempt stopped after five minutes of listing
