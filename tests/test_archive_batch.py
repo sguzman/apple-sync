@@ -83,7 +83,7 @@ class ChunkTests(unittest.TestCase):
         for state, expected in (('active', True), ('activating', True),
                                 ('inactive', False), ('failed', False)):
             with self.subTest(state=state):
-                response = subprocess.CompletedProcess([], 0, state + '\\n', '')
+                response = subprocess.CompletedProcess([], 0, state + '\n', '')
                 with patch.object(mod.subprocess, 'run', return_value=response):
                     self.assertEqual(mod.google_drive_busy(), expected)
         response = subprocess.CompletedProcess([], 1, '', 'error')
@@ -98,8 +98,8 @@ class ChunkTests(unittest.TestCase):
             def fake_preview(*args, **kwargs):
                 called.append(kwargs.get('defer_google'))
                 raise mod.GoogleDriveBusy()
-            with patch.object(mod, 'STATE', state), \\
-                    patch.object(mod, 'safe_directory'), \\
+            with patch.object(mod, 'STATE', state), \
+                    patch.object(mod, 'safe_directory'), \
                     patch.object(mod, 'preview', side_effect=fake_preview):
                 self.assertEqual(mod.run_progress_locked(True, defer_google=True), 0)
             self.assertEqual(called, [True])
@@ -108,7 +108,7 @@ class ChunkTests(unittest.TestCase):
     def test_live_defer_skips_before_listing(self):
         with TemporaryDirectory() as directory:
             destination = Path(directory) / 'dest'
-            with patch.object(mod, 'google_drive_busy', return_value=True), \\
+            with patch.object(mod, 'google_drive_busy', return_value=True), \
                     patch.object(mod.subprocess, 'run') as run:
                 with self.assertRaises(mod.GoogleDriveBusy):
                     mod.preview('photos-album-animated', 'icloudphotos:PrimarySync/Animated',
@@ -135,9 +135,9 @@ class ChunkTests(unittest.TestCase):
                 temp.write_bytes(piece)
                 return hashlib.sha256(piece).hexdigest()
 
-            with patch.object(mod.subprocess, 'run', return_value=listing), \\
-                    patch.object(mod, 'stream_range', side_effect=fake_range), \\
-                    patch.object(mod, 'MAX_BYTES', 4), \\
+            with patch.object(mod.subprocess, 'run', return_value=listing), \
+                    patch.object(mod, 'stream_range', side_effect=fake_range), \
+                    patch.object(mod, 'MAX_BYTES', 4), \
                     patch.object(mod, 'CHUNK_BYTES', 4):
                 mod.preview('photos-album-animated', 'icloudphotos:PrimarySync/Animated',
                             destination, state, execute=True)
