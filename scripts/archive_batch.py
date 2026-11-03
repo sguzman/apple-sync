@@ -45,6 +45,26 @@ def fail(msg: str) -> None:
     raise RuntimeError(msg)
 
 
+class GoogleDriveBusy(Exception):
+    """Defer a Photos pass without advancing its album cursor."""
+
+
+def google_drive_busy() -> bool:
+    """Fail closed when the local Google Drive service state is uncertain."""
+    status = subprocess.run(
+        ['systemctl', '--user', 'show', 'google-drive-rclone.service',
+         '--property=ActiveState', '--value', '--no-pager'],
+        capture_output=True, text=True, timeout=8, check=False)
+    if status.returncode:
+        fail('Cannot determine Google Drive service state; deferring Apple transfer')
+    state = status.stdout.strip()
+    if state in ('active', 'activating', 'reloading', 'deactivating'):
+        return True
+    if state in ('inactive', 'failed'):
+        return False
+    fail(f'Unexpected Google Drive service state: {state!r}')
+
+
 def safe_path(raw: object) -> Path | None:
     if not isinstance(raw, str) or not raw or any(c in raw for c in ('\x00', '\n', '\r')):
         return None
@@ -243,7 +263,7 @@ def progress_index(state_root: Path) -> int:
     return index
 
 
-def run_progress(execute: bool) -> int:
+def run_progress(execute: bool, *, defer_google: bool = False) -> int:
     """Visit one modest built-in album per run, never requiring All Photos."""
     # The normal run() lock guards archive mutation; the selection and cursor
     # must be inside the very same lock to avoid double-scheduling albums.
@@ -259,17 +279,17 @@ def run_progress(execute: bool) -> int:
         STATE.mkdir(exist_ok=True)
     lockpath = ROOT / '.apple-sync.lock'
     if not execute and not lockpath.exists():
-        return run_progress_locked(execute)
+        return run_progress_locked(execute, defer_google=defer_google)
     with lockpath.open('a+') as lock:
         try:
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             print('Another apple-sync pass is active; skipping')
             return 0
-        return run_progress_locked(execute)
+        return run_progress_locked(execute, defer_google=defer_google)
 
 
-def run_progress_locked(execute: bool) -> int:
+def run_progress_locked(execute: bool, *, defer_google: bool = False) -> int:
     index = progress_index(STATE)
     album = PROGRESS_ALBUMS[index]
     kind = 'photos-album-' + album.lower().replace(' ', '-')
@@ -278,18 +298,28 @@ def run_progress_locked(execute: bool) -> int:
     print(f'photos-progress: album {index + 1}/{len(PROGRESS_ALBUMS)} '
           f'({album}); All Photos inventory is NOT required', flush=True)
     try:
-        return preview(kind, source, destination, STATE, execute=execute)
-    finally:
+        result = preview(kind, source, destination, STATE, execute=execute,
+                         defer_google=defer_google)
+    except GoogleDriveBusy:
+        print('photos-progress: DEFER: Google Drive is active; '
+              'no album cursor advancement', flush=True)
+        return 0
+    except Exception:
         if execute:
-            # Move on even after a timeout or a partial download; checkpointed
-            # files remain resumable when this album is visited again.
+            # Faults from the iCloud source must not permanently starve
+            # other albums; the failed album will be retried next rotation.
             write_json_atomic(STATE / PROGRESS_CURSOR,
                               {'version': 1, 'next': (index + 1) % len(PROGRESS_ALBUMS)})
+        raise
+    if execute:
+        write_json_atomic(STATE / PROGRESS_CURSOR,
+                          {'version': 1, 'next': (index + 1) % len(PROGRESS_ALBUMS)})
+    return result
 
 
-def run(kind: str, execute: bool) -> int:
+def run(kind: str, execute: bool, *, defer_google: bool = False) -> int:
     if kind == 'photos-progress':
-        return run_progress(execute)
+        return run_progress(execute, defer_google=defer_google)
     # Recent live probes found inconsistent byte-range reads on iCloud Drive.
     # Fail closed until a verified strategy replaces this temporary guard.
     if execute and kind == 'drive':
@@ -319,8 +349,10 @@ def run(kind: str, execute: bool) -> int:
 
 
 def preview(kind: str, source: str, destination: Path, state_root: Path,
-            execute: bool) -> int:
+            execute: bool, *, defer_google: bool = False) -> int:
     started = time.monotonic()
+    if execute and defer_google and google_drive_busy():
+        raise GoogleDriveBusy()
     print(f'{kind}: listing {source} recursively (up to {LIST_SECONDS // 60} minutes); '
           'no downloads until listing completes', flush=True)
     try:
@@ -350,6 +382,8 @@ def preview(kind: str, source: str, destination: Path, state_root: Path,
         return 0
     budget = MAX_BYTES
     for item in todo:
+        if execute and defer_google and google_drive_busy():
+            raise GoogleDriveBusy()
         if budget <= 0 or RUN_SECONDS - (time.monotonic() - started) < 15:
             break
         rel = safe_path(item['rel'])
@@ -364,6 +398,8 @@ def preview(kind: str, source: str, destination: Path, state_root: Path,
                 pass
             write_json_atomic(meta, state)
         while state['committed'] < entry['Size'] and budget > 0:
+            if defer_google and google_drive_busy():
+                raise GoogleDriveBusy()
             remaining = RUN_SECONDS - (time.monotonic() - started)
             if remaining < 15:
                 break
@@ -390,9 +426,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('kind', choices=sorted((*SOURCES, 'photos-progress')))
     parser.add_argument('--execute', action='store_true')
+    parser.add_argument('--defer-while-google', action='store_true',
+                        help='for incremental Photos, pause if Google Drive is active')
     args = parser.parse_args()
     try:
-        return run(args.kind, args.execute)
+        if args.defer_while_google and args.kind != 'photos-progress':
+            fail('--defer-while-google is only supported by photos-progress')
+        return run(args.kind, args.execute, defer_google=args.defer_while_google)
     except (RuntimeError, OSError, ValueError, json.JSONDecodeError,
             subprocess.SubprocessError) as exc:
         print(f'apple-sync: {exc}', file=sys.stderr)
