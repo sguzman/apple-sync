@@ -125,6 +125,28 @@ class PhotosInventoryTests(unittest.TestCase):
                 self.assertEqual(batch.preview('photos', SOURCE, dest, state,
                                                execute=False), 0)
 
+    def test_full_batch_does_not_plan_downloads_for_ambiguous_names(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            destination = root / 'archive'
+            destination.mkdir()
+            state = root / 'state'
+            records = [entry('same.HEIC', 100),
+                       {**entry('same.HEIC', 200), 'ID': 'second'},
+                       entry('unambiguous.HEIC', 300)]
+            inventory.save(state, SOURCE, records)
+            captured = []
+            def track_candidates(entries, *_a, **_kw):
+                captured.extend(entries)
+                return []
+            with patch.object(batch, 'candidates', side_effect=track_candidates), \
+                    patch.object(batch.subprocess, 'run',
+                                 side_effect=AssertionError('remote inventory queried')):
+                self.assertEqual(batch.preview('photos', SOURCE, destination,
+                                               state, execute=False), 0)
+            self.assertEqual([row['Path'] for row in captured],
+                             ['unambiguous.HEIC'])
+
     def test_cache_refresh_mode_is_not_a_media_download(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
