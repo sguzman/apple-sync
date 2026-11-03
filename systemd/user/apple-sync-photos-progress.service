@@ -1,0 +1,10 @@
+[Unit]
+Description=Apple Sync incremental built-in Photos album archival (subset only)
+ConditionPathIsMountPoint=/drive
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/apple-sync-batch photos-progress --execute
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=20min
