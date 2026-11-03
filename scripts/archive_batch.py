@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+
 import photos_inventory
 
 MOUNT = Path('/drive')
