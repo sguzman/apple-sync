@@ -90,10 +90,32 @@ staging for a future visit. The album cursor lives under
 `/drive/icloud/.apple-sync-state`. It is not stored in Git.
 
 A separate user-systemd `apple-sync-photos-progress.timer` is installed
-**disabled**. Once a live progress pass, restart/resumption, and bandwidth
-coordination with the existing Google Drive downloader have been checked,
-the incremental subset timer can be enabled **independently** of the
-full-library and iCloud Drive timers:
+**disabled**. Its service uses `--defer-while-google`: when the local
+`google-drive-rclone.service` is running, the Apple worker defers without
+advancing its album cursor; it also rechecks before each download chunk
+(approximately every 8 MiB). If the Google service state cannot be read,
+the Apple job fails closed. This requires the Google downloader to run
+under that exact systemd user unit name. The existing Google repository
+and timer are not modified.
+
+This is **best-effort bandwidth coordination**, not a shared global lock.
+A Google run that starts midway through an Apple listing or chunk can
+temporarily overlap, and if Google stays busy constantly, scheduled
+Apple progress may be delayed indefinitely. A future shared scheduler
+would be needed for strict exclusivity and fairness.
+
+To test the guarded production entrypoint locally before enabling:
+
+    python3 -m unittest discover -s tests -v
+    systemctl --user show google-drive-rclone.service -p ActiveState --value
+    timeout 1000s python3 scripts/archive_batch.py photos-progress --execute --defer-while-google
+
+A `DEFER` result means **no downloaded bytes and no cursor advance**;
+it is a safe skip, not proof of a successful archive. Check a later pass
+when Google is inactive.
+
+After repeated live testing and bandwidth review, the incremental subset
+timer may be enabled **independently** of the full-library and Drive timers:
 
     systemctl --user enable --now apple-sync-photos-progress.timer
 
@@ -170,7 +192,7 @@ must remain blocked until a robust approach is implemented and live-tested.
 
 ## Download budgets and persistent resumption
 
-The two independent hourly jobs remain **disabled until explicitly enabled**. A run scans the relevant remote, then advances files using read-only rclone byte-range requests. It does not rely on interrupted rclone copy files resuming automatically.
+The full-library Photos and iCloud Drive timers remain **disabled until explicitly enabled**. The separate incremental album timer is also initially disabled. A run scans the relevant remote, then advances files using read-only rclone byte-range requests. It does not rely on interrupted rclone copy files resuming automatically.
 
 - **128 MiB maximum requested payload per hourly pass**, unlimited number of small files within that byte budget.
 - **512 KiB/s rclone transfer cap**; eight-MiB source byte-range chunks.
