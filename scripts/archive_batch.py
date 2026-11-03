@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import photos_inventory
 
 MOUNT = Path('/drive')
 ROOT = MOUNT / 'icloud'
@@ -317,7 +318,41 @@ def run_progress_locked(execute: bool, *, defer_google: bool = False) -> int:
     return result
 
 
+def refresh_photos_inventory(execute: bool, *, defer_google: bool = False) -> int:
+    source, destination = SOURCES['photos']
+    safe_directory(destination)
+    configured = subprocess.run(['rclone', 'listremotes'], capture_output=True,
+                                text=True, timeout=15, check=True)
+    if 'icloudphotos:' not in configured.stdout.splitlines():
+        fail('Missing local icloudphotos: remote')
+    if not execute:
+        entries, total = photos_inventory.load(STATE, source)
+        print(f'All Photos: cached {len(entries)} files, {total} listed bytes '
+              '(no remote call, no media downloads)', flush=True)
+        return 0
+    if defer_google and google_drive_busy():
+        print('All Photos inventory: DEFER; Google Drive is active', flush=True)
+        return 0
+    if STATE.is_symlink() or (ROOT / '.apple-sync.lock').is_symlink():
+        fail('Refusing symlink in Apple archive state')
+    STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with (ROOT / '.apple-sync.lock').open('a+') as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print('Another apple-sync pass is active; inventory deferred', flush=True)
+            return 0
+        print('All Photos: refreshing metadata (up to 30 minutes); '
+              'no photo/video downloads', flush=True)
+        count, total = photos_inventory.refresh(STATE, source)
+        print(f'All Photos: saved {count} file records, {total} source bytes '
+              'in private local inventory', flush=True)
+    return 0
+
+
 def run(kind: str, execute: bool, *, defer_google: bool = False) -> int:
+    if kind == 'photos-inventory':
+        return refresh_photos_inventory(execute, defer_google=defer_google)
     if kind == 'photos-progress':
         return run_progress(execute, defer_google=defer_google)
     # Recent live probes found inconsistent byte-range reads on iCloud Drive.
@@ -338,14 +373,16 @@ def run(kind: str, execute: bool, *, defer_google: bool = False) -> int:
     lockpath = ROOT / '.apple-sync.lock'
     if not execute and not lockpath.exists():
         # Pure preview mode must not create even a lock file.
-        return preview(kind, source, destination, STATE, execute=False)
+        return preview(kind, source, destination, STATE, execute=False,
+                       defer_google=defer_google)
     with lockpath.open('a+') as lock:
         try:
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             print('Another apple-sync pass is active; skipping')
             return 0
-        return preview(kind, source, destination, STATE, execute=execute)
+        return preview(kind, source, destination, STATE, execute=execute,
+                       defer_google=defer_google)
 
 
 def preview(kind: str, source: str, destination: Path, state_root: Path,
@@ -353,30 +390,36 @@ def preview(kind: str, source: str, destination: Path, state_root: Path,
     started = time.monotonic()
     if execute and defer_google and google_drive_busy():
         raise GoogleDriveBusy()
-    print(f'{kind}: listing {source} recursively (up to {LIST_SECONDS // 60} minutes); '
-          'no downloads until listing completes', flush=True)
-    try:
-        listing = subprocess.run(['rclone', 'lsjson', source, '--recursive',
-                                  '--files-only', '--checkers', '1', '--tpslimit', '2'],
-                                 capture_output=True, text=True, timeout=LIST_SECONDS,
-                                 check=False)
-    except subprocess.TimeoutExpired:
-        fail(f'{kind}: listing timed out after {LIST_SECONDS} seconds; '
-             'no downloads attempted')
-    if listing.returncode:
-        fail(f'Unable to list {kind}; no downloads attempted (exit {listing.returncode})')
-    entries = json.loads(listing.stdout)
-    if not isinstance(entries, list):
-        fail('Unexpected listing format')
+    if kind == 'photos':
+        entries, total_bytes = photos_inventory.load(state_root, source)
+        print(f'{kind}: using {len(entries)} cached files ({total_bytes} bytes); '
+              'no remote listing', flush=True)
+    else:
+        print(f'{kind}: listing {source} recursively (up to {LIST_SECONDS // 60} minutes); '
+              'no downloads until listing completes', flush=True)
+        try:
+            listing = subprocess.run(['rclone', 'lsjson', source, '--recursive',
+                                      '--files-only', '--checkers', '1', '--tpslimit', '2'],
+                                     capture_output=True, text=True, timeout=LIST_SECONDS,
+                                     check=False)
+        except subprocess.TimeoutExpired:
+            fail(f'{kind}: listing timed out after {LIST_SECONDS} seconds; '
+                 'no downloads attempted')
+        if listing.returncode:
+            fail(f'Unable to list {kind}; no downloads attempted (exit {listing.returncode})')
+        entries = json.loads(listing.stdout)
+        if not isinstance(entries, list):
+            fail('Unexpected listing format')
     print(f'{kind}: listed {len(entries)} file entries in '
           f'{time.monotonic() - started:.1f}s; checking local progress', flush=True)
     todo = candidates(entries, destination, state_root, kind, repair=execute)
     print(f'{kind}: {len(todo)} missing/in-progress files; per-run budget '
           f'{MAX_BYTES // (1024 * 1024)} MiB, {RUN_SECONDS // 60} min; '
           f'{"EXECUTE" if execute else "DRY RUN"}')
-    for item in todo[:6]:
-        print(f'  {item["state"]["committed"]}/{item["entry"]["Size"]} '
-              f'{item["rel"]}', flush=True)
+    if kind != 'photos':
+        for item in todo[:6]:
+            print(f'  {item["state"]["committed"]}/{item["entry"]["Size"]} '
+                  f'{item["rel"]}', flush=True)
     if not execute:
         print('Dry run: no files downloaded')
         return 0
@@ -424,14 +467,16 @@ def preview(kind: str, source: str, destination: Path, state_root: Path,
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('kind', choices=sorted((*SOURCES, 'photos-progress')))
+    parser.add_argument('kind', choices=sorted((*SOURCES, 'photos-progress',
+                                                'photos-inventory')))
     parser.add_argument('--execute', action='store_true')
     parser.add_argument('--defer-while-google', action='store_true',
                         help='for incremental Photos, pause if Google Drive is active')
     args = parser.parse_args()
     try:
-        if args.defer_while_google and args.kind != 'photos-progress':
-            fail('--defer-while-google is only supported by photos-progress')
+        if args.defer_while_google and args.kind not in ('photos-progress',
+                                                          'photos', 'photos-inventory'):
+            fail('--defer-while-google is only supported by Photos workers')
         return run(args.kind, args.execute, defer_google=args.defer_while_google)
     except (RuntimeError, OSError, ValueError, json.JSONDecodeError,
             subprocess.SubprocessError) as exc:
