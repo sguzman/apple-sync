@@ -27,7 +27,7 @@ class ChunkTests(unittest.TestCase):
             state.mkdir()
             selected = []
 
-            def fake_preview(kind, source, destination, state_root, execute):
+            def fake_preview(kind, source, destination, state_root, execute, *, defer_google=False):
                 self.assertTrue(execute)
                 self.assertEqual(state_root, state)
                 selected.append((kind, source, destination))
@@ -77,6 +77,83 @@ class ChunkTests(unittest.TestCase):
             with patch.object(mod, 'STATE', state):
                 with self.assertRaisesRegex(RuntimeError, 'Invalid Photos progress cursor'):
                     mod.run_progress_locked(False)
+
+    def test_google_busy_states_fail_closed(self):
+        import subprocess
+        for state, expected in (('active', True), ('activating', True),
+                                ('inactive', False), ('failed', False)):
+            with self.subTest(state=state):
+                response = subprocess.CompletedProcess([], 0, state + '\\n', '')
+                with patch.object(mod.subprocess, 'run', return_value=response):
+                    self.assertEqual(mod.google_drive_busy(), expected)
+        response = subprocess.CompletedProcess([], 1, '', 'error')
+        with patch.object(mod.subprocess, 'run', return_value=response):
+            with self.assertRaisesRegex(RuntimeError, 'Cannot determine Google Drive'):
+                mod.google_drive_busy()
+
+    def test_google_defer_does_not_advance_cursor(self):
+        with TemporaryDirectory() as directory:
+            state = Path(directory)
+            called = []
+            def fake_preview(*args, **kwargs):
+                called.append(kwargs.get('defer_google'))
+                raise mod.GoogleDriveBusy()
+            with patch.object(mod, 'STATE', state), \\
+                    patch.object(mod, 'safe_directory'), \\
+                    patch.object(mod, 'preview', side_effect=fake_preview):
+                self.assertEqual(mod.run_progress_locked(True, defer_google=True), 0)
+            self.assertEqual(called, [True])
+            self.assertFalse((state / mod.PROGRESS_CURSOR).exists())
+
+    def test_live_defer_skips_before_listing(self):
+        with TemporaryDirectory() as directory:
+            destination = Path(directory) / 'dest'
+            with patch.object(mod, 'google_drive_busy', return_value=True), \\
+                    patch.object(mod.subprocess, 'run') as run:
+                with self.assertRaises(mod.GoogleDriveBusy):
+                    mod.preview('photos-album-animated', 'icloudphotos:PrimarySync/Animated',
+                                destination, Path(directory), execute=True,
+                                defer_google=True)
+                run.assert_not_called()
+
+    def test_resumes_partials_on_next_pass_without_overwriting(self):
+        import hashlib
+        import subprocess
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            destination = root / 'dest'
+            destination.mkdir()
+            state = root / 'state'
+            data = b'abcdefg'
+            entry = {'Path': 'sample.HEIC', 'Size': len(data),
+                     'ModTime': 'stable', 'ID': 'asset'}
+            listing = subprocess.CompletedProcess(
+                [], 0, json.dumps([entry]), '')
+
+            def fake_range(remote, offset, count, temp, remaining_seconds):
+                piece = data[offset:offset+count]
+                temp.write_bytes(piece)
+                return hashlib.sha256(piece).hexdigest()
+
+            with patch.object(mod.subprocess, 'run', return_value=listing), \\
+                    patch.object(mod, 'stream_range', side_effect=fake_range), \\
+                    patch.object(mod, 'MAX_BYTES', 4), \\
+                    patch.object(mod, 'CHUNK_BYTES', 4):
+                mod.preview('photos-album-animated', 'icloudphotos:PrimarySync/Animated',
+                            destination, state, execute=True)
+                self.assertFalse((destination / 'sample.HEIC').exists())
+                part, meta = mod.state_paths(state, 'photos-album-animated', 'sample.HEIC')
+                self.assertEqual(part.read_bytes(), b'abcd')
+                self.assertEqual(json.loads(meta.read_text())['committed'], 4)
+                mod.preview('photos-album-animated', 'icloudphotos:PrimarySync/Animated',
+                            destination, state, execute=True)
+                self.assertEqual((destination / 'sample.HEIC').read_bytes(), data)
+                self.assertFalse(part.exists())
+                self.assertFalse(meta.exists())
+                # A subsequent pass must preserve the immutable completed file.
+                mod.preview('photos-album-animated', 'icloudphotos:PrimarySync/Animated',
+                            destination, state, execute=True)
+                self.assertEqual((destination / 'sample.HEIC').read_bytes(), data)
 
     def test_path_safety(self):
         for bad in ('../evil', '/absolute', 'x//y', 'x/./y', 'x/../y', '', 'a\npath'):
