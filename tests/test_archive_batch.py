@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 SRC = Path(__file__).parents[1] / 'scripts' / 'archive_batch.py'
 spec = importlib.util.spec_from_file_location('archive_batch', SRC)
@@ -19,6 +20,63 @@ class ChunkTests(unittest.TestCase):
         self.assertNotEqual(
             mod.key_for('photos-favorites', 'sample.HEIC'),
             mod.key_for('photos', 'sample.HEIC'))
+
+    def test_photo_progress_rotates_and_keeps_album_state_isolated(self):
+        with TemporaryDirectory() as directory:
+            state = Path(directory) / 'state'
+            state.mkdir()
+            selected = []
+
+            def fake_preview(kind, source, destination, state_root, execute):
+                self.assertTrue(execute)
+                self.assertEqual(state_root, state)
+                selected.append((kind, source, destination))
+                return 0
+
+            with patch.object(mod, 'STATE', state), \
+                    patch.object(mod, 'safe_directory'), \
+                    patch.object(mod, 'preview', side_effect=fake_preview):
+                for _ in range(len(mod.PROGRESS_ALBUMS) + 1):
+                    self.assertEqual(mod.run_progress_locked(True), 0)
+
+            self.assertEqual(len(selected), len(mod.PROGRESS_ALBUMS) + 1)
+            self.assertEqual(selected[0], selected[-1])
+            self.assertEqual([x[1].split('/')[-1] for x in selected[:-1]],
+                             list(mod.PROGRESS_ALBUMS))
+            self.assertEqual(json.loads((state / mod.PROGRESS_CURSOR).read_text())['next'], 1)
+            self.assertNotIn('Hidden', mod.PROGRESS_ALBUMS)
+            self.assertNotIn('Recently Deleted', mod.PROGRESS_ALBUMS)
+            self.assertNotIn('All Photos', mod.PROGRESS_ALBUMS)
+            self.assertEqual(len({x[2] for x in selected[:-1]}), len(mod.PROGRESS_ALBUMS))
+
+    def test_photo_progress_preview_does_not_write_cursor(self):
+        with TemporaryDirectory() as directory:
+            state = Path(directory) / 'missing'
+            with patch.object(mod, 'STATE', state), \
+                    patch.object(mod, 'safe_directory'), \
+                    patch.object(mod, 'preview', return_value=0) as preview:
+                self.assertEqual(mod.run_progress_locked(False), 0)
+            self.assertFalse(state.exists())
+            preview.assert_called_once()
+            self.assertFalse(preview.call_args.kwargs['execute'])
+
+    def test_photo_progress_timeout_moves_cursor_for_next_attempt(self):
+        with TemporaryDirectory() as directory:
+            state = Path(directory)
+            with patch.object(mod, 'STATE', state), \
+                    patch.object(mod, 'safe_directory'), \
+                    patch.object(mod, 'preview', side_effect=RuntimeError('listing timed out')):
+                with self.assertRaisesRegex(RuntimeError, 'listing timed out'):
+                    mod.run_progress_locked(True)
+            self.assertEqual(json.loads((state / mod.PROGRESS_CURSOR).read_text())['next'], 1)
+
+    def test_photo_progress_rejects_invalid_cursor(self):
+        with TemporaryDirectory() as directory:
+            state = Path(directory)
+            (state / mod.PROGRESS_CURSOR).write_text('{"version":1,"next":999}')
+            with patch.object(mod, 'STATE', state):
+                with self.assertRaisesRegex(RuntimeError, 'Invalid Photos progress cursor'):
+                    mod.run_progress_locked(False)
 
     def test_path_safety(self):
         for bad in ('../evil', '/absolute', 'x//y', 'x/./y', 'x/../y', '', 'a\npath'):
