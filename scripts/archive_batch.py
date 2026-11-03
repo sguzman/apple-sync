@@ -412,7 +412,7 @@ def preview(kind: str, source: str, destination: Path, state_root: Path,
         entries = json.loads(listing.stdout)
         if not isinstance(entries, list):
             fail('Unexpected listing format')
-    print(f'{kind}: listed {len(entries)} file entries in '
+    print(f'{kind}: processing {len(entries)} file entries after '
           f'{time.monotonic() - started:.1f}s; checking local progress', flush=True)
     todo = candidates(entries, destination, state_root, kind, repair=execute)
     print(f'{kind}: {len(todo)} missing/in-progress files; per-run budget '
@@ -473,7 +473,7 @@ def main() -> int:
                                                 'photos-inventory')))
     parser.add_argument('--execute', action='store_true')
     parser.add_argument('--defer-while-google', action='store_true',
-                        help='for incremental Photos, pause if Google Drive is active')
+                        help='for Photos workers, defer while Google Drive backup is active')
     args = parser.parse_args()
     try:
         if args.defer_while_google and args.kind not in ('photos-progress',
