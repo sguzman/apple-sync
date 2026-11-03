@@ -347,8 +347,11 @@ def refresh_photos_inventory(execute: bool, *, defer_google: bool = False) -> in
         print('All Photos: refreshing metadata (up to 30 minutes); '
               'no photo/video downloads', flush=True)
         count, total = photos_inventory.refresh(STATE, source)
+        entries, _ = photos_inventory.load(STATE, source)
+        _, collisions, ambiguous = photos_inventory.unambiguous_entries(entries)
         print(f'All Photos: saved {count} file records, {total} source bytes '
-              'in private local inventory', flush=True)
+              f'in private local inventory; {collisions} duplicate paths '
+              f'covering {ambiguous} ambiguous records (not downloaded)', flush=True)
     return 0
 
 
@@ -394,8 +397,12 @@ def preview(kind: str, source: str, destination: Path, state_root: Path,
         raise GoogleDriveBusy()
     if kind == 'photos':
         entries, total_bytes = photos_inventory.load(state_root, source)
-        print(f'{kind}: using {len(entries)} cached files ({total_bytes} bytes); '
-              'no remote listing', flush=True)
+        raw_count = len(entries)
+        entries, collision_paths, collision_records = photos_inventory.unambiguous_entries(entries)
+        print(f'{kind}: using {raw_count} locally cached records '
+              f'({total_bytes} listed bytes); no remote listing; '
+              f'{collision_paths} duplicate paths covering {collision_records} '
+              'records excluded from name-based downloads for safety', flush=True)
     else:
         print(f'{kind}: listing {source} recursively (up to {LIST_SECONDS // 60} minutes); '
               'no downloads until listing completes', flush=True)
