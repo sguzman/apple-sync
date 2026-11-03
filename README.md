@@ -72,8 +72,7 @@ Videos and Favorites. Hidden and Recently Deleted are deliberately
 excluded. The album directories and individual progress checkpoints are
 separate from `photos/primary`. Albums may overlap, and the worker does
 not deduplicate files between albums. **This is only a partial archive of
-selected collections, not a backup of all 16,563 reported All Photos
-items.** The canonical full-library path remains unmodified and disabled.
+selected collections, not a backup of the full All Photos library.** The canonical full-library path remains unmodified and disabled.
 
 To exercise one real progress pass from the repository:
 
@@ -106,9 +105,8 @@ substitute for full-library backup.
 
 ## First live Photos archive: bounded Favorites album
 
-The initial `photos --execute` attempt on 2026-11-02 stopped after five
-minutes of listing `PrimarySync/All Photos` (16,563 reported items); **no
-downloads were attempted**. Rclone's iCloud Photos backend documents that
+A live `photos --execute` attempt stopped after five minutes of listing
+`PrimarySync/All Photos`; **no downloads were attempted**. Rclone's iCloud Photos backend documents that
 initial scans of large albums require expensive pagination and can benefit
 from its local disk cache after a complete scan.
 
@@ -120,8 +118,7 @@ waiting for a complete All Photos inventory, the script additionally supports:
     python3 -m unittest discover -s tests -v
     timeout 1000s python3 scripts/archive_batch.py photos-favorites --execute
 
-The small built-in Favorites album was confirmed in the user's Apple Photos
-library during reconnaissance. This archive uses the same byte-range,
+The built-in Favorites album is suitable for a small initial archive test. This archive uses the same byte-range,
 checksum, lock and no-overwrite implementation as the full Photos archive;
 it writes only to `/drive/icloud/photos/albums/Favorites` and separate
 checkpoint state. It has the same 128 MiB/15-minute pass limits and will
