@@ -83,17 +83,25 @@ remote **metadata discovery** from **media download**:
    download only missing bytes (128 MiB per pass, 512 KiB/s), and resume
    interrupted large files. Completed local copies remain immutable.
 3. An **opt-in** daily `apple-sync-photos-inventory.timer` refreshes
-   metadata with rclone's native disk cache and lightweight Apple change
-   check. The initial remote listing can be slow; later refreshes should
+   our private local snapshot by asking rclone for its inventory. Rclone's
+   backend uses Apple change tokens and a persistent disk cache, so when
+   nothing changes it should not re-download the whole metadata listing
+   from Apple. Our script still receives and writes a full **local** JSON
+   snapshot at each refresh; it does not make a full cold network request
+   on every bounded download pass. The initial remote listing can be slow; later refreshes should
    normally reuse rclone's cache. New media is discovered at the next
    successful inventory refresh, not instantly. A cached manifest older
    than **48 hours** is refused until refreshed: no stale snapshot is
    silently treated as an up-to-date source. The separate bounded archive
    timer is hourly once explicitly enabled after live validation.
 
-The inventory cache never goes into Git. It refuses empty, malformed,
-duplicate-path or unsafe listings; atomic writes prevent partial refreshes
-from replacing the previous completed inventory. If a refresh omits any
+The inventory cache never goes into Git. It refuses empty, malformed or unsafe listings; atomic writes prevent
+partial refreshes from replacing the previous completed inventory. Apple
+can expose distinct assets under an identical visible path: the inventory
+retains *all* those records, but the name-based downloader excludes every
+ambiguous path and reports their counts until an ID-targeted strategy is
+validated. A successful full-library pass is therefore **not** a completeness
+claim while any collisions remain unresolved. If a refresh omits any
 previously inventoried path (whether due to real cloud deletion or an
 incomplete Apple/rclone listing), it stops and keeps the prior inventory
 for review rather than silently dropping those records. No cloud deletions
