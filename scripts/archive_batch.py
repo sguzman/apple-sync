@@ -22,6 +22,11 @@ CHUNK_BYTES = 8 * 1024 * 1024
 RATE = '512K'
 RUN_SECONDS = 15 * 60
 LIST_SECONDS = 5 * 60
+# Built-in, non-private collections with manageable listings. Albums overlap;
+# this is an incremental subset, NOT a complete iCloud Photos backup.
+PROGRESS_ALBUMS = ('Animated', 'Bursts', 'Panoramas', 'Slo-mo',
+                   'Time-lapse', 'Videos', 'Favorites')
+PROGRESS_CURSOR = 'photos-progress-cursor.json'
 SOURCES = {
     'drive': ('icloud:', ROOT / 'drive'),
     'photos': ('icloudphotos:PrimarySync/All Photos', ROOT / 'photos' / 'primary'),
@@ -30,6 +35,10 @@ SOURCES = {
     'photos-favorites': ('icloudphotos:PrimarySync/Favorites',
                          ROOT / 'photos' / 'albums' / 'Favorites'),
 }
+for album in PROGRESS_ALBUMS:
+    SOURCES['photos-album-' + album.lower().replace(' ', '-')] = (
+        'icloudphotos:PrimarySync/' + album,
+        ROOT / 'photos' / 'albums' / album)
 
 
 def fail(msg: str) -> None:
@@ -220,7 +229,67 @@ def candidates(entries: list[dict], destination: Path, state_root: Path,
     return [dict(rel=rel, entry=e, state=s) for _, rel, e, s in selected]
 
 
+def progress_index(state_root: Path) -> int:
+    """Read the next album cursor without modifying state on dry runs."""
+    path = state_root / PROGRESS_CURSOR
+    if path.is_symlink():
+        fail('Refusing symlink Photos progress cursor')
+    if not path.exists():
+        return 0
+    data = json.loads(path.read_text(encoding='utf-8'))
+    index = data.get('next')
+    if data.get('version') != 1 or type(index) is not int or not (0 <= index < len(PROGRESS_ALBUMS)):
+        fail('Invalid Photos progress cursor; refusing to guess')
+    return index
+
+
+def run_progress(execute: bool) -> int:
+    """Visit one modest built-in album per run, never requiring All Photos."""
+    # The normal run() lock guards archive mutation; the selection and cursor
+    # must be inside the very same lock to avoid double-scheduling albums.
+    base = ROOT / 'photos' / 'albums'
+    safe_directory(base)
+    configured = subprocess.run(['rclone', 'listremotes'], check=True,
+                                capture_output=True, text=True, timeout=15)
+    if 'icloudphotos:' not in configured.stdout.splitlines():
+        fail('Missing local icloudphotos: remote')
+    if ROOT.joinpath('.apple-sync.lock').is_symlink() or STATE.is_symlink():
+        fail('Refusing symlink lock/state directory')
+    if execute:
+        STATE.mkdir(exist_ok=True)
+    lockpath = ROOT / '.apple-sync.lock'
+    if not execute and not lockpath.exists():
+        return run_progress_locked(execute)
+    with lockpath.open('a+') as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print('Another apple-sync pass is active; skipping')
+            return 0
+        return run_progress_locked(execute)
+
+
+def run_progress_locked(execute: bool) -> int:
+    index = progress_index(STATE)
+    album = PROGRESS_ALBUMS[index]
+    kind = 'photos-album-' + album.lower().replace(' ', '-')
+    source, destination = SOURCES[kind]
+    safe_directory(destination)
+    print(f'photos-progress: album {index + 1}/{len(PROGRESS_ALBUMS)} '
+          f'({album}); All Photos inventory is NOT required', flush=True)
+    try:
+        return preview(kind, source, destination, STATE, execute=execute)
+    finally:
+        if execute:
+            # Move on even after a timeout or a partial download; checkpointed
+            # files remain resumable when this album is visited again.
+            write_json_atomic(STATE / PROGRESS_CURSOR,
+                              {'version': 1, 'next': (index + 1) % len(PROGRESS_ALBUMS)})
+
+
 def run(kind: str, execute: bool) -> int:
+    if kind == 'photos-progress':
+        return run_progress(execute)
     # Recent live probes found inconsistent byte-range reads on iCloud Drive.
     # Fail closed until a verified strategy replaces this temporary guard.
     if execute and kind == 'drive':
@@ -319,7 +388,7 @@ def preview(kind: str, source: str, destination: Path, state_root: Path,
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('kind', choices=sorted(SOURCES))
+    parser.add_argument('kind', choices=sorted((*SOURCES, 'photos-progress')))
     parser.add_argument('--execute', action='store_true')
     args = parser.parse_args()
     try:
