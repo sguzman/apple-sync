@@ -355,15 +355,37 @@ To report the previously saved counts and size without contacting Apple:
 
     python3 scripts/drive_inventory.py
 
-An explicit refresh starts **one bounded recursive** `rclone lsjson icloud:`
-command (which may require many Apple API calls), streams up to 128 MiB of
-JSON metadata into a private temporary file,
-and gives the listing up to 25 minutes. Its invocation can first wait for up
-to twelve minutes for Google Drive and existing Photos services to be idle.
-The shared Apple archive lock prevents overlapping archive writes. If a
-listing times out, fails, is malformed/unsafe, or omits previously known
-asset identities, the prior complete snapshot is retained, and an operator
-can investigate cloud deletions/renames rather than silently discarding them.
+The first attempt exposed an operational flaw: on 2026-11-04 a scheduled
+backup became active during a long recursive enumeration, the scan deferred,
+and no finished snapshot existed. The subsequent status command returned
+`INVENTORY_NOT_CREATED` even though no source data was damaged.
+
+The inventory now uses a **resumable per-folder breadth-first traversal**,
+with one nonrecursive `rclone lsjson` request per folder. After each folder
+is successfully listed, its records and remaining directory queue are saved
+atomically under `/drive/icloud/.apple-sync-state/drive-inventory-progress.json`
+(mode 0600). Future executions resume at the first outstanding folder; they
+do not relist folders already checkpointed. A folder interrupted by an active
+backup is retried later, while completed folder records are preserved.
+
+A pass has a 12-minute enumeration budget, with a two-minute per-folder
+limit, an 8-MiB response ceiling per folder, a 128-MiB progress manifest
+limit and a maximum of 250,000 records. It optionally waits up to twelve
+minutes for Google Drive and Photos workers to be idle. The Apple archive
+lock coordinates with Photos workers without disabling or reconfiguring
+them. The final complete inventory is installed only once **every reachable
+folder** was successfully enumerated and validated. If an expected source
+record disappears, a failed refresh does not replace the previous snapshot.
+
+On a partial result, the command prints `Drive inventory PARTIAL` with the
+number of folders completed, folders pending and records checkpointed.
+The status command reports both an existing complete snapshot (if any) and
+partial checkpoint counts; `NO_COMPLETE_SNAPSHOT` is informative, not a
+failed read. A partial folder walk **is not a full inventory**.
+
+This reduces repeat work after interruptions, but each new folder still
+requires Apple API calls. It does not establish perfect remote coverage,
+and frequent full refreshes are still inappropriate.
 
 **Critically, a normal backup worker must never enumerate the entire Drive
 before each download pass.** This snapshot is designed to be reused locally
