@@ -22,7 +22,8 @@ link_safe() {
   ln -sfn "$source" "$target"
 }
 link_safe "$repo_dir/scripts/archive_batch.py" "$bin_dir/apple-sync-batch"
-for kind in drive photos photos-progress photos-inventory; do
+link_safe "$repo_dir/scripts/drive_inventory.py" "$bin_dir/apple-sync-drive-inventory"
+for kind in drive photos photos-progress photos-inventory drive-inventory; do
   for suffix in service timer; do
     link_safe "$repo_dir/systemd/user/apple-sync-$kind.$suffix" "$unit_dir/apple-sync-$kind.$suffix"
   done
@@ -32,4 +33,6 @@ printf 'Installed symlinks for apple-sync. Timers are NOT enabled.\n'
 printf 'Preview: %s/apple-sync-batch drive\n' "$bin_dir"
 printf 'Preview: %s/apple-sync-batch photos\n' "$bin_dir"
 printf 'Incremental preview: %s/apple-sync-batch photos-progress\n' "$bin_dir"
-printf 'All Photos and Drive timers remain disabled; progress timer also starts disabled.\n'
+printf 'Installer NEVER enables timers; existing enabled state is left unchanged.\n'
+printf 'Optional resumable Drive inventory timer: systemctl --user enable --now apple-sync-drive-inventory.timer\n'
+printf 'The actual Drive downloader timer remains disabled until explicit later approval.\n'
