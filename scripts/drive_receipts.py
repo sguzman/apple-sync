@@ -110,6 +110,13 @@ def create_receipt(state_root: Path, source_entry: dict,
             os.fsync(stream.fileno())
         try:
             os.link(name, receipt, follow_symlinks=False)
+            # Crash durability: the content was fsynced above, and the
+            # directory entry is now fsynced before claiming success.
+            dirfd = os.open(receipt.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(dirfd)
+            finally:
+                os.close(dirfd)
         except FileExistsError:
             # We do not accept existing records as permission to overwrite.
             # An old/tampered record is reported by the audit.
@@ -134,11 +141,17 @@ def check_receipt(state_root: Path, source_entry: dict,
             return 'invalid'
         if not receipt.exists():
             return 'missing'
-        mode = receipt.stat().st_mode
-        if not stat.S_ISREG(mode) or mode & 0o077:
+        fd = os.open(receipt, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+        with os.fdopen(fd, 'rb') as stream:
+            info = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(info.st_mode)
+                    or info.st_mode & 0o077
+                    or info.st_size > 256 * 1024):
+                return 'invalid'
+            encoded = stream.read(256 * 1024 + 1)
+        if len(encoded) > 256 * 1024:
             return 'invalid'
-        with receipt.open('r', encoding='utf-8') as stream:
-            record = json.load(stream)
+        record = json.loads(encoded)
         if (not isinstance(record, dict)
                 or record.get('version') != 1
                 or record.get('remote') != SOURCE
