@@ -91,6 +91,17 @@ class ChunkTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Cannot determine Google Drive'):
                 mod.google_drive_busy()
 
+    def test_full_photos_google_defer_exits_cleanly(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        output = StringIO()
+        with patch.object(mod.sys, 'argv', ['archive_batch.py', 'photos',
+                                           '--execute', '--defer-while-google']), \\
+                patch.object(mod, 'run', side_effect=mod.GoogleDriveBusy()), \\
+                redirect_stdout(output):
+            self.assertEqual(mod.main(), 0)
+        self.assertIn('DEFER: Google Drive backup is active', output.getvalue())
+
     def test_google_defer_does_not_advance_cursor(self):
         with TemporaryDirectory() as directory:
             state = Path(directory)
