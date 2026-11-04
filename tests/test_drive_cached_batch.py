@@ -231,6 +231,138 @@ class CachedBatchTests(unittest.TestCase):
             publisher.assert_not_called()
             listing.assert_not_called()
 
+    def test_empty_profile_only_selects_unambiguous_regular_zero_byte_files(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            rows = [file('empty-a.txt', 0), file('empty-b.txt', 0),
+                    file('has-content.txt', 1),
+                    file('empty-native.pages', 0),
+                    file('duplicate.txt', 0, 'first'),
+                    file('duplicate.txt', 0, 'second'),
+                    {'Path': 'directory', 'IsDir': True, 'Size': 0}]
+            chosen, stats = mod.candidates(
+                rows, root, min_file_size=0, max_file_size=0)
+            self.assertEqual([entry['Path'] for entry in chosen],
+                             ['empty-a.txt', 'empty-b.txt'])
+            self.assertEqual(stats['ambiguous'], 2)
+            self.assertEqual(stats['excluded'], 2)
+
+    def test_empty_profile_publishes_at_most_one_file(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest = root / 'drive'
+            state = root / 'state'
+            dest.mkdir()
+            mod.inventory.save(state, [file('a-empty.txt', 0),
+                                       file('b-empty.txt', 0)])
+            seen = []
+            def publish(_scope, entry, *_args, **_kwargs):
+                seen.append(entry['Path'])
+                return 'PUBLISHED_VERIFIED'
+            output = io.StringIO()
+            with (patch.object(mod.archive, 'ROOT', root),
+                  patch.object(mod.archive, 'STATE', state),
+                  patch.object(mod.archive, 'SOURCES',
+                               {'drive': ('icloud:', dest)}),
+                  patch.object(mod.archive, 'safe_directory'),
+                  patch.object(mod.diagnosis, 'backup_busy', return_value=False),
+                  patch.object(mod.pilot, 'publish_verified', side_effect=publish),
+                  contextlib.redirect_stdout(output)):
+                self.assertEqual(mod.run(execute=True, empty=True), 0)
+            self.assertEqual(seen, ['a-empty.txt'])
+            self.assertIn('1 verified files published', output.getvalue())
+            self.assertIn('0 bytes', output.getvalue())
+
+    def test_empty_verified_publication_requires_two_matching_empty_reads(self):
+        import hashlib
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest = root / 'drive'
+            state = root / 'state'
+            dest.mkdir()
+            state.mkdir()
+            entry = file('zero.bin', 0)
+            reads = []
+            def empty_read(remote, target, _deadline):
+                reads.append(remote)
+                target.write_bytes(b'')
+                return 0, hashlib.sha256(b'').hexdigest()
+            with patch.object(mod.diagnosis, 'backup_busy', return_value=False):
+                result = mod.pilot.publish_verified(
+                    'icloud:', entry, dest, state,
+                    time.monotonic() + 90,
+                    whole_reader=empty_read,
+                    list_reader=lambda *_args: [entry])
+            self.assertEqual(result, 'PUBLISHED_VERIFIED')
+            self.assertEqual(reads, ['icloud:zero.bin', 'icloud:zero.bin'])
+            self.assertTrue((dest / 'zero.bin').is_file())
+            self.assertEqual((dest / 'zero.bin').stat().st_size, 0)
+            self.assertEqual(list(state.iterdir()), [])
+
+    def test_fake_zero_hash_never_publishes_placeholder(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest = root / 'drive'
+            state = root / 'state'
+            dest.mkdir()
+            state.mkdir()
+            entry = file('zero.bin', 0)
+            def spoofed_read(_remote, target, _deadline):
+                target.write_bytes(b'')
+                return 0, '0' * 64
+            with patch.object(mod.diagnosis, 'backup_busy', return_value=False):
+                result = mod.pilot.publish_verified(
+                    'icloud:', entry, dest, state,
+                    time.monotonic() + 90,
+                    whole_reader=spoofed_read,
+                    list_reader=lambda *_args: [entry])
+            self.assertEqual(result, 'DEFER_EMPTY_HASH_MISMATCH')
+            self.assertFalse((dest / 'zero.bin').exists())
+
+    def test_live_recheck_rejects_remote_directory_even_when_identity_matches(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest = root / 'drive'
+            state = root / 'state'
+            dest.mkdir()
+            state.mkdir()
+            entry = file('zero.bin', 0)
+            import hashlib
+            def read(_remote, target, _deadline):
+                target.write_bytes(b'')
+                return 0, hashlib.sha256(b'').hexdigest()
+            changed = {**entry, 'IsDir': True}
+            with patch.object(mod.diagnosis, 'backup_busy', return_value=False):
+                result = mod.pilot.publish_verified(
+                    'icloud:', entry, dest, state,
+                    time.monotonic() + 90, whole_reader=read,
+                    list_reader=lambda *_args: [changed])
+            self.assertEqual(result, 'DEFER_SOURCE_CHANGED')
+            self.assertFalse((dest / 'zero.bin').exists())
+
+    def test_empty_mode_requires_complete_inventory_even_for_preview(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            mod.inventory.save_progress(root, {
+                'version': 1, 'source': 'icloud:', 'pending': [''],
+                'finished': [], 'entries': []})
+            with (patch.object(mod.archive, 'STATE', root),
+                  patch.object(mod.pilot, 'publish_verified') as publisher,
+                  patch.object(mod.inventory, 'list_one_folder') as listing,
+                  contextlib.redirect_stdout(io.StringIO())):
+                self.assertEqual(mod.run(execute=False, empty=True), 0)
+                self.assertEqual(mod.run(execute=True, empty=True), 2)
+            publisher.assert_not_called()
+            listing.assert_not_called()
+
+    def test_empty_and_large_modes_cannot_be_combined(self):
+        with patch.object(mod.inventory, 'load') as inventory_load:
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(mod.run(large=True, empty=True), 2)
+            inventory_load.assert_not_called()
+            self.assertIn('conflicting profiles', output.getvalue())
+
     def test_partial_inventory_fails_closed_without_any_remote_calls(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
