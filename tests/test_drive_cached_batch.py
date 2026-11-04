@@ -102,6 +102,105 @@ class CachedBatchTests(unittest.TestCase):
             self.assertEqual(result, 'DEFER_WHOLE_MISMATCH')
             self.assertFalse((dest / 'tiny.bin').exists())
 
+    def test_large_profile_keeps_only_8_to_64_mib_ordinary_files(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            rows = [
+                file('small.bin', mod.MAX_FILE_SIZE),
+                file('large.bin', mod.MAX_FILE_SIZE + 1),
+                file('huge.bin', mod.MAX_LARGE_FILE_SIZE + 1),
+                file('maximum.bin', mod.MAX_LARGE_FILE_SIZE),
+                file('native.pages', 16 * mod.MIB),
+                file('ambiguous.bin', 12 * mod.MIB, 'a'),
+                file('ambiguous.bin', 12 * mod.MIB, 'b'),
+            ]
+            candidates, stats = mod.candidates(
+                rows, root,
+                min_file_size=mod.MAX_FILE_SIZE + 1,
+                max_file_size=mod.MAX_LARGE_FILE_SIZE)
+            self.assertEqual([item['Path'] for item in candidates],
+                             ['large.bin', 'maximum.bin'])
+            self.assertEqual(stats['ambiguous'], 2)
+            self.assertEqual(stats['excluded'], 3)
+
+    def test_large_preview_never_uses_remote_or_archive_publisher(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive_root = root / 'drive'
+            archive_root.mkdir()
+            mod.inventory.save(root, [
+                file('small.bin', 4096),
+                file('large.bin', 12 * mod.MIB)])
+            output = io.StringIO()
+            with (patch.object(mod.archive, 'STATE', root),
+                  patch.object(mod.archive, 'SOURCES',
+                               {'drive': ('icloud:', archive_root)}),
+                  patch.object(mod.pilot, 'publish_verified') as publish,
+                  patch.object(mod.inventory, 'list_one_folder') as listing,
+                  patch.object(mod.diagnosis, 'backup_busy') as busy,
+                  contextlib.redirect_stdout(output)):
+                self.assertEqual(mod.run(execute=False, large=True), 0)
+            publish.assert_not_called()
+            listing.assert_not_called()
+            busy.assert_not_called()
+            self.assertIn('(large)', output.getvalue())
+            self.assertIn('1 eligible missing', output.getvalue())
+
+    def test_large_pass_reserves_twice_size_and_at_most_one_file(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / 'state'
+            dest = root / 'drive'
+            dest.mkdir()
+            mod.inventory.save(state, [
+                file('large-one.bin', 9 * mod.MIB, 'first'),
+                file('large-two.bin', 10 * mod.MIB, 'second'),
+                file('large-three.bin', 11 * mod.MIB, 'third')])
+            invoked = []
+            def fake_publish(scope, entry, *_args, **kwargs):
+                self.assertIsNotNone(kwargs.get('whole_reader'))
+                invoked.append((scope, entry['Path'], entry['Size'],
+                                kwargs['whole_reader']))
+                return 'PUBLISHED_VERIFIED'
+            output = io.StringIO()
+            with (patch.object(mod.archive, 'ROOT', root),
+                  patch.object(mod.archive, 'STATE', state),
+                  patch.object(mod.archive, 'SOURCES',
+                               {'drive': ('icloud:', dest)}),
+                  patch.object(mod.archive, 'safe_directory'),
+                  patch.object(mod.diagnosis, 'backup_busy', return_value=False),
+                  patch.object(mod.pilot, 'publish_verified',
+                               side_effect=fake_publish),
+                  contextlib.redirect_stdout(output)):
+                self.assertEqual(mod.run(execute=True, large=True), 0)
+            self.assertEqual(len(invoked), 1)
+            self.assertEqual(invoked[0][:3],
+                             ('icloud:', 'large-one.bin', 9 * mod.MIB))
+            with patch.object(mod.pilot.verification, 'whole_file',
+                              return_value=(9 * mod.MIB, 'hash')) as reader:
+                self.assertEqual(invoked[0][3]('remote', root / 'temp', 90),
+                                 (9 * mod.MIB, 'hash'))
+            reader.assert_called_once_with(
+                'remote', root / 'temp', 90,
+                max_file_bytes=mod.MAX_LARGE_FILE_SIZE)
+            self.assertIn('1 verified files published', output.getvalue())
+            self.assertIn('18874368 bytes', output.getvalue())
+
+    def test_large_pass_denied_if_inventory_only_partially_checkpointed(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            mod.inventory.save_progress(
+                root, {'version': 1, 'source': 'icloud:',
+                       'pending': [''], 'finished': [], 'entries': []})
+            with (patch.object(mod.archive, 'STATE', root),
+                  patch.object(mod.pilot, 'publish_verified') as publisher,
+                  patch.object(mod.inventory, 'list_one_folder') as listing,
+                  contextlib.redirect_stdout(io.StringIO())):
+                self.assertEqual(mod.run(execute=False, large=True), 0)
+                self.assertEqual(mod.run(execute=True, large=True), 2)
+            publisher.assert_not_called()
+            listing.assert_not_called()
+
     def test_partial_inventory_fails_closed_without_any_remote_calls(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
