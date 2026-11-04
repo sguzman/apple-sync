@@ -233,7 +233,7 @@ def fetch_chunk_with_retry(remote: str, offset: int, first_count: int,
             temporary.unlink(missing_ok=True)
             if attempt + 1 >= RANGE_ATTEMPTS or requested >= budget:
                 return None, None, 0, requested, True
-            count = max(MIN_RETRY_CHUNK, count // 2)
+            count = min(first_count, max(MIN_RETRY_CHUNK, count // 2))
             # Small bounded backoff; do not turn an interruption into an
             # unbounded retry loop or conceal an unsuccessful transfer.
             pause = min(2 ** attempt, 4)
