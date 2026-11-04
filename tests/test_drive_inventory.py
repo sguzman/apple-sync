@@ -291,6 +291,51 @@ class DriveInventoryTests(unittest.TestCase):
             self.assertEqual(calls[0][:3], ['rclone', 'lsjson', 'icloud:Desktop'])
             self.assertNotIn('--recursive', calls[0])
 
+    def test_resume_only_skips_network_and_backups_after_complete_snapshot(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            mod.save(root, [file()])
+            self.assertFalse(mod.resume_needed(root))
+            output = io.StringIO()
+            with (patch.object(mod.archive, 'STATE', root),
+                  patch.object(mod.archive, 'safe_directory') as mount_check,
+                  patch.object(mod.diagnosis, 'backup_busy') as busy_check,
+                  patch.object(mod.diagnosis, 'wait_for_idle') as idle_wait,
+                  patch.object(mod.subprocess, 'run') as network_call,
+                  contextlib.redirect_stdout(output)):
+                self.assertEqual(mod.run(execute=True, wait_idle=True,
+                                         resume_only=True), 0)
+            mount_check.assert_not_called()
+            busy_check.assert_not_called()
+            idle_wait.assert_not_called()
+            network_call.assert_not_called()
+            self.assertIn('resume-only mode makes no remote calls',
+                          output.getvalue())
+            self.assertIsNone(mod.load_progress(root))
+
+    def test_resume_only_proceeds_with_checkpoint_and_no_snapshot(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.assertTrue(mod.resume_needed(root))
+            mod.save_progress(root, {'version': 1, 'source': mod.SOURCE,
+                                     'pending': ['Desktop'], 'finished': [''],
+                                     'entries': [file('root.txt')]})
+            self.assertTrue(mod.resume_needed(root))
+            mod.save(root, [file()])
+            # A deliberate, partially completed refresh still needs completion.
+            self.assertTrue(mod.resume_needed(root))
+
+    def test_resume_only_rejects_corrupt_inventory_and_does_not_rescan(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            mod.save(root, [file()])
+            manifest = mod.inventory_path(root)
+            data = json.loads(manifest.read_text())
+            data['source'] = 'other:'
+            manifest.write_text(json.dumps(data))
+            with self.assertRaisesRegex(mod.InventoryError, 'MISMATCH'):
+                mod.resume_needed(root)
+
     def test_remote_listing_is_recursive_and_size_capped(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
