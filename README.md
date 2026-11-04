@@ -266,6 +266,20 @@ secrets, or file data. A pass across samples is **not** validation for every
 iCloud Drive file or permission to enable unattended archiving. The downloader
 must remain blocked until a robust approach is implemented and live-tested.
 
+## Live first full-library media pass (2026-11-03)
+
+After the first persistent inventory succeeded (20,566 records, 52,483,863,139
+listed bytes, 26 ambiguous records), a real bounded full-library run
+completed **18 files**, then rclone returned exit status 5 and a short
+8 MiB response (7,962,624 bytes rather than 8,388,608). The downloader
+correctly rejected the incomplete response; the 18 fully published
+files remain in the immutable archive, and the affected file was not
+published as complete. This motivated bounded retry with adaptive smaller
+ranges and a per-pass request budget that includes failed attempts.
+The fix needs live validation before enabling unattended full-library
+archiving. This is separate from the known iCloud Drive overlap mismatch,
+which remains blocked.
+
 ## Download budgets and persistent resumption
 
 The full-library Photos, its daily inventory refresh, and iCloud Drive timers
@@ -275,13 +289,13 @@ locally cached inventory (not a fresh remote listing), then advances
 missing files using read-only rclone byte-range requests. It does not rely on interrupted rclone copy files resuming automatically.
 
 - **128 MiB maximum requested payload per hourly pass**, unlimited number of small files within that byte budget.
-- **512 KiB/s rclone transfer cap**; eight-MiB source byte-range chunks.
+- **512 KiB/s rclone transfer cap**; up to eight-MiB source byte-range chunks. A short/failed range is discarded and retried at the same offset with a smaller request (up to four attempts, with short backoff). If all attempts fail, its verified partial remains staged and the pass can continue to other media. The 128 MiB source-request budget also counts unsuccessful attempts; HTTP/protocol overhead is additional.
 - **15-minute maximum execution time** including listing.
 - **No maximum file size:** a 2-GiB video is staged in 128-MiB hourly installments and atomically published only after complete. When a run stops, completed chunks remain under /drive/icloud/.apple-sync-state; the next run checks the last chunk's SHA-256 and resumes at the recorded byte offset.
 - Both remotes share a non-overlap lock; previously started large transfers are prioritized over new files.
 - Final archive files cannot be overwritten or deleted by this downloader. Remote deletions never propagate.
 - The script refuses to resume a changed source if listed size, timestamp, ID or hashes differ from the saved metadata. Such partials are retained for manual resolution.
-- Network traffic includes protocol overhead and can exceed the requested payload cap. A failed chunk is not counted as durable progress and ends that run.
+- Network traffic includes protocol overhead and can exceed the requested payload cap. A failed or short chunk is **never** counted as durable progress: its temporary bytes are discarded. A repeatedly failing file is explicitly reported as deferred; other files can advance without overwriting existing archive content.
 - **Live end-to-end validation is still needed.** Rclone's iCloud Photos backend is experimental; whether byte-range requests work correctly for the actual Apple file URLs must be verified before enabling schedules. The Apple API may also omit items from listings. Source hashes are not always available, so full end-to-end cryptographic verification is not always possible.
 - Timers are staggered at :10 (Drive) and :40 (Photos), but the separate Google Drive downloader might still overlap. Do not enable the new timers until total bandwidth is reviewed.
 
