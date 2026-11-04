@@ -22,17 +22,22 @@ import drive_inventory as inventory
 import pilot_drive_archive as pilot
 
 MAX_FILE_SIZE = pilot.MAX_PILOT_BYTES
+MIB = 1024 * 1024
+MAX_LARGE_FILE_SIZE = 64 * MIB
 # Whole-file verification does not depend on a 64-KiB lower bound.
 # Exclude true zero-byte files until explicit empty-object semantics are tested.
 MIN_FILE_SIZE = 1
 MAX_FILES = 2
 MAX_ATTEMPTS = 3
-MAX_SOURCE_BYTES = 24 * 1024 * 1024
+MAX_SOURCE_BYTES = 24 * MIB
+MAX_LARGE_SOURCE_BYTES = 2 * MAX_LARGE_FILE_SIZE
 RUN_SECONDS = 12 * 60
 MAX_CACHE_AGE = 30 * 24 * 60 * 60
 
 
-def candidates(entries: list[dict], destination: Path) -> tuple[list[dict], dict]:
+def candidates(entries: list[dict], destination: Path, *,
+               min_file_size: int = MIN_FILE_SIZE,
+               max_file_size: int = MAX_FILE_SIZE) -> tuple[list[dict], dict]:
     """Select unambiguous ordinary files without touching remote network."""
     counts = Counter(entry['Path'] for entry in entries
                      if isinstance(entry, dict) and 'Path' in entry)
@@ -46,8 +51,8 @@ def candidates(entries: list[dict], destination: Path) -> tuple[list[dict], dict
             stats['ambiguous'] += 1
             continue
         size = entry.get('Size')
-        if (type(size) is not int or size < MIN_FILE_SIZE
-                or size > MAX_FILE_SIZE
+        if (type(size) is not int or size < min_file_size
+                or size > max_file_size
                 or diagnosis.is_iwork(path)
                 or not diagnosis.valid_path(path)):
             stats['excluded'] += 1
@@ -81,7 +86,8 @@ def safe_recheck(_scope: str, deadline: float, folder: str) -> list[dict]:
     return inventory.list_one_folder(folder, timeout=min(60, remaining - 5))
 
 
-def run(*, execute: bool = False, wait_idle: bool = False) -> int:
+def run(*, execute: bool = False, wait_idle: bool = False,
+        large: bool = False) -> int:
     # Critically: no calls to rclone, no Apple listing, no archival writes
     # until a fully validated inventory snapshot has been loaded.
     try:
@@ -98,8 +104,15 @@ def run(*, execute: bool = False, wait_idle: bool = False) -> int:
     destination = archive.SOURCES['drive'][1]
     if execute:
         archive.safe_directory(destination)
-    files, stats = candidates(entries, destination)
-    print(f'Drive cached batch: {inv_stats["count"]} cached records; '
+    min_bytes = MAX_FILE_SIZE + 1 if large else MIN_FILE_SIZE
+    max_bytes = MAX_LARGE_FILE_SIZE if large else MAX_FILE_SIZE
+    max_files = 1 if large else MAX_FILES
+    max_attempts = 2 if large else MAX_ATTEMPTS
+    max_source_bytes = MAX_LARGE_SOURCE_BYTES if large else MAX_SOURCE_BYTES
+    files, stats = candidates(entries, destination,
+                              min_file_size=min_bytes, max_file_size=max_bytes)
+    profile = 'large' if large else 'small'
+    print(f'Drive cached batch ({profile}): {inv_stats["count"]} cached records; '
           f'{len(files)} eligible missing ordinary files; '
           f'{stats["ambiguous"]} ambiguous records excluded; '
           f'{stats["excluded"]} ineligible records; '
@@ -134,10 +147,10 @@ def run(*, execute: bool = False, wait_idle: bool = False) -> int:
                   flush=True)
             return 0
         for entry in files:
-            if archived >= MAX_FILES or attempted >= MAX_ATTEMPTS:
+            if archived >= max_files or attempted >= max_attempts:
                 break
             size = entry['Size']
-            if requested_budget + 2 * size > MAX_SOURCE_BYTES:
+            if requested_budget + 2 * size > max_source_bytes:
                 continue
             if deadline - time.monotonic() < 30 or diagnosis.backup_busy():
                 print('Drive cached batch DEFER: busy or insufficient time; '
@@ -148,8 +161,18 @@ def run(*, execute: bool = False, wait_idle: bool = False) -> int:
             attempted += 1
             requested_budget += 2 * size
             try:
+                # The default 8-MiB whole-file cap stays unchanged for
+                # ordinary batches. Large mode explicitly extends the
+                # bound to 64 MiB while retaining the same two-copy checks.
+                whole_reader = None
+                if large:
+                    def whole_reader(remote, target, remaining):
+                        return pilot.verification.whole_file(
+                            remote, target, remaining,
+                            max_file_bytes=MAX_LARGE_FILE_SIZE)
                 result = pilot.publish_verified(
                     scope, relative, destination, archive.STATE, deadline,
+                    whole_reader=whole_reader,
                     list_reader=lambda _scope, left, folder=folder:
                         safe_recheck(_scope, left, folder))
             except (pilot.PilotError, pilot.verification.VerificationError,
@@ -175,10 +198,14 @@ def main() -> int:
                         help='explicitly archive up to two independently verified files')
     parser.add_argument('--wait-idle', action='store_true',
                         help='wait for other backups to be idle')
+    parser.add_argument('--large', action='store_true',
+                        help='separately opt in to one 8–64 MiB file, '
+                        'two whole-file verification reads, 128-MiB limit')
     args = parser.parse_args()
     if args.wait_idle and not args.execute:
         parser.error('--wait-idle requires --execute')
-    return run(execute=args.execute, wait_idle=args.wait_idle)
+    return run(execute=args.execute, wait_idle=args.wait_idle,
+               large=args.large)
 
 
 if __name__ == '__main__':
