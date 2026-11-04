@@ -132,7 +132,7 @@ python3 scripts/archive_batch.py photos-inventory
 python3 scripts/archive_batch.py photos
 ```
 
-The first inventory may be deferred if the Google Drive service is active.
+The first inventory may be deferred if the Google Drive service is active. Likewise, a full Photos transfer using `--defer-while-google` reports `DEFER` and exits cleanly if Google is busy; this is **not** evidence of downloaded bytes. Any already committed partial chunks remain preserved for the next pass.
 Confirm a nonzero item count and plausible total size before trying the
 bounded full-library `photos --execute --defer-while-google` run. Do not
 enable `apple-sync-photos.timer` or `apple-sync-photos-inventory.timer`
