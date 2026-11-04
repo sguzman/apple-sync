@@ -439,6 +439,55 @@ metadata requests before it completes. It is **not** an incremental or
 change-token-backed future inventory refresh. Continue treating Drive
 download automation as blocked until explicitly validated.
 
+## Metered, one-time Drive inventory trial (administrative opt-in)
+
+Because the previous hourly **user** service had `IPAccounting=no`
+and showed no ingress/egress data, its past bandwidth cannot be
+reconstructed. A deliberately separate, root-run helper can make
+**one measured trial** using a transient **system** service, with
+`IPAccounting=yes` and `User=sguzman`. The worker still runs as
+the regular user, uses the same existing source/checkpoint and backup
+locks, and never starts the Drive download worker.
+
+The previously enabled hourly user timer must remain **disabled**:
+
+    systemctl --user show apple-sync-drive-inventory.timer -p ActiveState
+
+Preview the exact trial parameters without doing anything:
+
+    python3 scripts/metered_drive_inventory_trial.py
+
+The *explicitly approved* one-time command is:
+
+    sudo -n /usr/bin/python3 scripts/metered_drive_inventory_trial.py --execute
+
+The helper first confirms a real `/drive` mount and a disabled
+user inventory timer. It runs a four-second, no-Apple service accounting
+preflight and checks for numeric ingress and egress counters. If
+unavailable, it refuses to launch the scanner. It then starts one
+ephemeral 90-second scanner invocation with a 10,000,000-byte
+combined ingress+egress **advisory budget** and polls systemd counters
+four times per second. It stops the complete service cgroup at
+8,000,000 counted bytes and prints the measured traffic. The
+transient service also has a 100-second runtime limit to stop an
+abandoned trial; no permanent service/timer is installed or enabled.
+Existing checkpointed folder progress is preserved.
+
+**This is not a strict network byte quota:** packets can arrive between
+polls; bursts can exceed the 8 MB stop point or even the 10 MB
+target. Accounting covers the service's IPv4/IPv6 sockets and
+subprocesses, not necessarily separately handled DNS traffic or other
+system services. For guaranteed hard limits, a separately engineered
+kernel/network-layer byte quota is required. The metadata response
+length caps in `drive_inventory.py` are not network traffic quotas.
+Never use this as justification to restart unmetered hourly scans.
+
+The helper requires passwordless or already-authorized noninteractive
+`sudo` for the current shell; if `sudo -n` denies access, it
+fails without running the scan. The user can authorize a single sudo
+session in their own terminal with `sudo -v`, then rerun. The trial
+does not perform automatic privilege escalation or ask for passwords.
+
 ## Local Drive coverage report (no Apple requests)
 
 Use the current private metadata snapshot or an **incomplete checkpoint** to
