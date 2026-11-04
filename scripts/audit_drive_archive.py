@@ -16,6 +16,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import archive_batch as archive
 import drive_inventory as inventory
+import drive_receipts as receipts
 import diagnose_drive_downloads as diagnosis
 
 
@@ -57,7 +58,8 @@ def check_local(destination: Path, path: str) -> tuple[str, int | None]:
         return 'unsafe_or_inaccessible', None
 
 
-def summarize(entries: list[dict], destination: Path) -> dict:
+def summarize(entries: list[dict], destination: Path,
+              *, state_root: Path | None = None) -> dict:
     """Aggregate the discovered records, not the unknowable whole Drive."""
     if entries:
         inventory.inspect_entries(entries)
@@ -83,10 +85,21 @@ def summarize(entries: list[dict], destination: Path) -> dict:
         elif local_size != size:
             results['size_mismatch'] += 1
         else:
-            results['size_matching_unverified'] += 1
             results['bytes_size_matching'] += local_size
-            if diagnosis.is_iwork(path):
-                results['native_size_matching_unverified'] += 1
+            receipt_result = ('missing' if state_root is None
+                              else receipts.check_receipt(state_root, item,
+                                                          destination / path))
+            if receipt_result == 'verified':
+                results['receipt_verified'] += 1
+                results['receipt_verified_bytes'] += local_size
+            else:
+                results['size_matching_unverified'] += 1
+                if receipt_result == 'invalid':
+                    results['invalid_receipt'] += 1
+                elif receipt_result == 'hash_mismatch':
+                    results['receipt_hash_mismatch'] += 1
+                if diagnosis.is_iwork(path):
+                    results['native_size_matching_unverified'] += 1
     return dict(results)
 
 
@@ -102,7 +115,7 @@ def report(*, state_root: Path | None = None,
     if not entries:
         return ('Drive archive audit: NO_INVENTORY; '
                 'nothing classified; no remote calls or writes')
-    summary = summarize(entries, destination)
+    summary = summarize(entries, destination, state_root=state_root)
     rows = [
         'Drive archive audit: ' +
         ('COMPLETE_SOURCE_SNAPSHOT' if complete else 'PARTIAL_SOURCE_CHECKPOINT'),
@@ -117,7 +130,10 @@ def report(*, state_root: Path | None = None,
         ('ambiguous', 'Ambiguous file records (excluded)'),
         ('missing', 'Destination files missing'),
         ('present_regular', 'Destination regular files present'),
-        ('size_matching_unverified', 'Size-matching existing files (NOT independently verified)'),
+        ('receipt_verified', 'Files with valid dual-whole-read receipt and matching local SHA-256'),
+        ('size_matching_unverified', 'Size-matching files without a valid verification receipt'),
+        ('invalid_receipt', 'Invalid/inaccessible receipt records'),
+        ('receipt_hash_mismatch', 'Receipt SHA-256 mismatches'),
         ('size_mismatch', 'Existing files with incorrect size'),
         ('unknown_size_present', 'Existing files with unknown cloud size'),
         ('not_regular', 'Existing nonregular destination objects'),
@@ -128,6 +144,10 @@ def report(*, state_root: Path | None = None,
         rows.append(f'{label}: {summary.get(key, 0)}')
     rows.append(f'Bytes of size-matching files: '
                 f'{summary.get("bytes_size_matching", 0)}')
+    rows.append(f'Bytes verified by receipt and current local SHA-256: '
+                f'{summary.get("receipt_verified_bytes", 0)}')
+    rows.append('Local receipts attest two matching whole-file Apple-visible reads, '
+                'not provider-signed authenticity.')
     rows.append('Size alone is not a cryptographic verification receipt.')
     rows.append('No Apple API calls, remote downloads or archive writes')
     return '\n'.join(rows)
