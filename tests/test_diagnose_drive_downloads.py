@@ -76,6 +76,28 @@ class DriveDownloadDiagnosisTests(unittest.TestCase):
         self.assertEqual([x['Path'] for x in mod.select_files(entries)],
                          ['normal.pdf', 'native.pages'])
 
+    def test_subprocess_stdout_is_bounded_even_if_backend_sends_too_much(self):
+        import subprocess
+        import sys
+        actual_popen = subprocess.Popen
+        def fake_spawn(_arguments, **kwargs):
+            return actual_popen([sys.executable, '-c',
+                                 "import sys; sys.stdout.buffer.write(b'x' * 1024)"],
+                                **kwargs)
+        with (patch.object(mod.subprocess, 'Popen', side_effect=fake_spawn),
+              patch.object(mod, 'MAX_DOWNLOAD_OUTPUT', 16)):
+            with self.assertRaisesRegex(mod.ReadFailure, 'OUTPUT_TOO_LARGE'):
+                mod.run_rclone(['cat', 'icloud:some-private-name'], 20)
+
+    def test_read_error_does_not_expose_remote_name(self):
+        import time
+        with patch.object(mod, 'run_rclone',
+                          side_effect=mod.ReadFailure('RCLONE_READ_ERROR')):
+            self.assertEqual(
+                mod.examine('icloud:Desktop/private-financial-document.pdf',
+                            10000, time.monotonic() + 90),
+                ('INCONCLUSIVE_READ_ERROR', 'RCLONE_READ_ERROR'))
+
     def test_examine_reads_two_full_files_and_three_overlapping_ranges(self):
         content = bytes(range(256)) * 20
         calls = []
