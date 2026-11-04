@@ -54,6 +54,74 @@ class DrivePilotTests(unittest.TestCase):
             self.assertEqual(self.reads, 2)
             self.assertEqual(list(state.iterdir()), [])
 
+    def test_new_publication_can_write_private_dual_read_receipt(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest, state = root / 'drive', root / 'state'
+            dest.mkdir()
+            state.mkdir(mode=0o700)
+            with patch.object(mod.diagnosis, 'backup_busy', return_value=False):
+                result = mod.publish_verified(
+                    'icloud:Downloads', self.entry, dest, state,
+                    mod.time.monotonic() + 90,
+                    whole_reader=self.whole, list_reader=lambda *_: [self.entry],
+                    record_receipt=True)
+            self.assertEqual(result, 'PUBLISHED_VERIFIED')
+            absolute_entry = {**self.entry, 'Path': 'Downloads/small.bin'}
+            target = dest / absolute_entry['Path']
+            self.assertEqual(
+                mod.receipts.check_receipt(state, absolute_entry, target),
+                'verified')
+            receipt = mod.receipts.receipt_path(state, absolute_entry['Path'])
+            self.assertTrue(receipt.is_file())
+            self.assertFalse(receipt.stat().st_mode & 0o077)
+            self.assertEqual(self.reads, 2)
+
+    def test_competing_publication_never_receives_new_receipt(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest, state = root / 'drive', root / 'state'
+            dest.mkdir()
+            state.mkdir(mode=0o700)
+            def competitor(_part, _meta, destination, rel, _size):
+                target = destination / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(self.data)
+                # Deliberately leave the staged part in place to imitate
+                # archive.finish's FileExistsError/no-overwrite return.
+            with (patch.object(mod.diagnosis, 'backup_busy', return_value=False),
+                  patch.object(mod.archive, 'finish', side_effect=competitor)):
+                result = mod.publish_verified(
+                    'icloud:Downloads', self.entry, dest, state,
+                    mod.time.monotonic() + 90,
+                    whole_reader=self.whole, list_reader=lambda *_: [self.entry],
+                    record_receipt=True)
+            self.assertEqual(result, 'SKIP_EXISTING')
+            self.assertFalse(mod.receipts.receipt_path(
+                state, 'Downloads/small.bin').exists())
+
+    def test_receipt_storage_failure_does_not_claim_verified(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest, state = root / 'drive', root / 'state'
+            dest.mkdir()
+            state.mkdir(mode=0o700)
+            with (patch.object(mod.diagnosis, 'backup_busy',
+                               return_value=False),
+                  patch.object(mod.receipts, 'create_receipt',
+                               side_effect=mod.receipts.ReceiptError('DISK_FULL'))):
+                with self.assertRaisesRegex(mod.receipts.ReceiptError, 'DISK_FULL'):
+                    mod.publish_verified(
+                        'icloud:Downloads', self.entry, dest, state,
+                        mod.time.monotonic() + 90,
+                        whole_reader=self.whole, list_reader=lambda *_: [self.entry],
+                        record_receipt=True)
+            # The valid archive publication may survive even though its
+            # receipt failed. Never overwrite or falsely certify it.
+            self.assertTrue((dest / 'Downloads' / 'small.bin').is_file())
+            self.assertFalse(mod.receipts.receipt_path(
+                state, 'Downloads/small.bin').exists())
+
     def test_existing_file_is_never_overwritten_or_read(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
