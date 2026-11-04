@@ -118,6 +118,86 @@ class DriveDownloadDiagnosisTests(unittest.TestCase):
         self.assertEqual([int(args[args.index('--offset') + 1])
                           for args in calls[2:]], [0, 1, 0])
 
+    def test_extended_uses_16k_ranges_and_checks_middle(self):
+        content = bytes(range(256)) * 96
+        calls = []
+        def reader(args, seconds):
+            calls.append(args)
+            if '--offset' not in args:
+                return content
+            offset = int(args[args.index('--offset') + 1])
+            count = int(args[args.index('--count') + 1])
+            return content[offset:offset + count]
+        with patch.object(mod, 'run_rclone', side_effect=reader):
+            result = mod.examine('icloud:Desktop/private.bin', len(content),
+                                 mod.time.monotonic() + 100, extended=True)
+        self.assertEqual(result, ('WHOLE_STABLE_MATCHES_SIZE',
+                                  'RANGE_AGREES_WITH_WHOLE'))
+        self.assertEqual(len(calls), 6)
+        self.assertEqual([int(args[args.index('--count') + 1])
+                          for args in calls[2:5]], [16384, 16384, 16384])
+        self.assertGreater(int(calls[5][calls[5].index('--offset') + 1]), 1)
+
+    def test_extended_detects_wrong_middle_even_when_prefix_works(self):
+        content = bytes(range(256)) * 96
+        def reader(args, seconds):
+            if '--offset' not in args:
+                return content
+            offset = int(args[args.index('--offset') + 1])
+            count = int(args[args.index('--count') + 1])
+            if offset > 1:
+                return b'X' * count
+            return content[offset:offset + count]
+        with patch.object(mod, 'run_rclone', side_effect=reader):
+            result = mod.examine('icloud:Desktop/private.bin', len(content),
+                                 mod.time.monotonic() + 100, extended=True)
+        self.assertEqual(result, ('WHOLE_STABLE_MATCHES_SIZE',
+                                  'RANGE_MIDDLE_DISAGREES_WITH_WHOLE'))
+
+    def test_varied_samples_include_small_large_and_iwork(self):
+        entries = [
+            {'Path': 'small.pdf', 'Size': 5000},
+            {'Path': 'medium.pdf', 'Size': 15000},
+            {'Path': 'large.pdf', 'Size': 500000},
+            {'Path': 'document.pages', 'Size': 10000},
+            {'Path': 'other.pdf', 'Size': 9000}]
+        selected = mod.varied_files(entries, 4)
+        names = [item['Path'] for item in selected]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertIn('small.pdf', names)
+        self.assertIn('large.pdf', names)
+        self.assertIn('document.pages', names)
+
+    def test_extended_defers_before_any_remote_reads_if_backup_busy(self):
+        output = io.StringIO()
+        with (patch.object(mod, 'backup_busy', return_value=True),
+              patch.object(mod, 'run_rclone') as reader,
+              contextlib.redirect_stdout(output)):
+            result = mod.diagnose(extended=True)
+        self.assertEqual(result, 0)
+        reader.assert_not_called()
+        self.assertIn('DEFER', output.getvalue())
+
+    def test_extended_diagnostic_handles_multiple_samples_privately(self):
+        content = bytes(range(256)) * 96
+        entries = [{'Path': 'private-a.pdf', 'Size': len(content), 'IsDir': False},
+                   {'Path': 'private-b.pdf', 'Size': len(content), 'IsDir': False}]
+        def reader(args, seconds):
+            if args[0] == 'lsjson':
+                return json.dumps(entries).encode()
+            offset = int(args[args.index('--offset') + 1]) if '--offset' in args else 0
+            count = int(args[args.index('--count') + 1]) if '--count' in args else len(content)
+            return content[offset:offset + count]
+        output = io.StringIO()
+        with (patch.object(mod, 'SCOPES', ('icloud:Desktop',)),
+              patch.object(mod, 'backup_busy', return_value=False),
+              patch.object(mod, 'run_rclone', side_effect=reader),
+              contextlib.redirect_stdout(output)):
+            self.assertEqual(mod.diagnose(extended=True), 0)
+        self.assertIn('2 fully consistent', output.getvalue())
+        self.assertNotIn('private-a', output.getvalue())
+        self.assertNotIn('private-b', output.getvalue())
+
     def test_diagnosis_output_does_not_leak_private_names_or_bytes(self):
         source = [{'Path': 'secret-document.pdf', 'Size': 5120, 'IsDir': False}]
         content = bytes(range(256)) * 20
