@@ -31,6 +31,12 @@ STOP_BYTES = 8_000_000
 POLL_SECONDS = 0.25
 PROPS = ('ActiveState', 'SubState', 'IPAccounting',
          'IPIngressBytes', 'IPEgressBytes')
+BUSY_UNITS = (
+    'google-drive-rclone.service',
+    'apple-sync-photos.service',
+    'apple-sync-photos-progress.service',
+    'apple-sync-photos-inventory.service',
+)
 
 
 class TrialError(Exception):
@@ -96,6 +102,8 @@ def start(unit: str, args: list[str], *, with_user: bool,
             '--property=WorkingDirectory=' + str(REPO),
             '--setenv=HOME=' + user.pw_dir,
             '--setenv=XDG_RUNTIME_DIR=/run/user/' + str(user.pw_uid),
+            '--setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/'
+            + str(user.pw_uid) + '/bus',
         ]
     run(command + args, timeout=15)
 
@@ -154,10 +162,54 @@ def preflight(unit: str) -> None:
         stop(unit)
 
 
+def worker_entry() -> int:
+    """Executed inside the transient system service as the regular user.
+
+    Distinguish a genuinely active backup from an inaccessible user manager
+    before allowing the original inventory worker to run unchanged.
+    """
+    for unit in BUSY_UNITS:
+        result = run(
+            ['systemctl', '--user', 'show', unit,
+             '--property=ActiveState', '--value', '--no-pager'],
+            timeout=8, check=False)
+        state = result.stdout.strip()
+        if result.returncode != 0 or state not in ('inactive', 'failed', 'active',
+                                                    'activating', 'deactivating'):
+            print(f'TRIAL_BLOCKED: USER_MANAGER_STATUS_UNAVAILABLE {unit}',
+                  flush=True)
+            return 3
+        print(f'TRIAL_BACKUP_STATE: {unit}={state}', flush=True)
+        if state not in ('inactive', 'failed'):
+            print(f'TRIAL_BLOCKED: OTHER_BACKUP_ACTIVE {unit}', flush=True)
+            return 3
+    print('TRIAL_USER_MANAGER_OK: proceeding with original backup locks',
+          flush=True)
+    os.execv('/usr/bin/python3',
+             ['/usr/bin/python3', str(WORKER), '--execute', '--resume-only'])
+    return 0
+
+
+def report_trial_service_log(unit: str) -> None:
+    """Relay only sanitized worker status; never print private filenames."""
+    result = run(
+        ['journalctl', '--system', '-u', unit, '-o', 'cat',
+         '--no-pager', '-n', '30'],
+        timeout=8, check=False)
+    if result.returncode:
+        print('TRIAL_WORKER_LOG: unavailable; inspect with journalctl',
+              flush=True)
+        return
+    for line in result.stdout.splitlines():
+        if line.startswith(('TRIAL_', 'Drive inventory ')):
+            print(line, flush=True)
+
+
 def trial(unit: str) -> None:
-    # Run the existing safe, resumable inventory worker unchanged.
-    # It is the regular user inside an ephemeral SYSTEM service.
-    args = ['/usr/bin/python3', str(WORKER), '--execute', '--resume-only']
+    # Launch a same-context user-manager check, then exec the original
+    # resumable inventory. This prevents silent zero-byte deferrals.
+    args = ['/usr/bin/python3', str(REPO / 'scripts'
+            / 'metered_drive_inventory_trial.py'), '--worker-entry']
     largest_ingress = largest_egress = 0
     reason = 'TIME_LIMIT'
     began = time.monotonic()
@@ -194,6 +246,7 @@ def trial(unit: str) -> None:
             largest_egress = max(largest_egress, egress)
         except (TrialError, subprocess.TimeoutExpired, OSError):
             pass
+        report_trial_service_log(unit)
         stop(unit)
         print(f'MEASURED IP INGRESS: {largest_ingress} bytes', flush=True)
         print(f'MEASURED IP EGRESS: {largest_egress} bytes', flush=True)
@@ -210,7 +263,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--execute', action='store_true',
                         help='perform one short system-accounted inventory trial')
+    parser.add_argument('--worker-entry', action='store_true',
+                        help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.worker_entry:
+        return worker_entry()
     if not args.execute:
         print('PREVIEW: one transient user-owned system service, '
               'IPAccounting=yes, 90s runtime, 8MB sampled cutoff; '
