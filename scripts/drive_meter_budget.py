@@ -30,7 +30,7 @@ class BudgetError(Exception):
 
 def _secure_file(path: Path) -> None:
     info = path.lstat()
-    if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or
             info.st_mode & 0o077 or info.st_nlink != 1):
         raise BudgetError('UNSAFE_METER_BUDGET_FILE')
 
@@ -77,7 +77,7 @@ class BudgetLedger:
             raise BudgetError('UNSAFE_METER_BUDGET_DIRECTORY')
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         info = self.root.stat()
-        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
                 or info.st_mode & 0o077):
             raise BudgetError('UNSAFE_METER_BUDGET_DIRECTORY')
         lock = self.root / LOCK_NAME
