@@ -249,8 +249,10 @@ A live rclone v1.75.2 probe reported **overlapping bytes disagree** for an
 iCloud Drive file, while the iCloud Photos sample passed. This does not yet
 prove whether the problem is backend-wide, file-specific, or a changing source.
 
-**Drive archive execution is temporarily blocked in code.** The Photos archive
-is also not yet approved for unattended operation. Do not enable timers.
+**Drive archive execution remains blocked in code.** Do not enable the
+Drive timer. The independent Photos archival timer was enabled and its first
+unattended 2026-11-03 run was confirmed to finish successfully; that does not
+establish iCloud Drive integrity.
 
 To classify the Drive failure without modifying the remote or archive:
 
@@ -258,13 +260,29 @@ To classify the Drive failure without modifying the remote or archive:
     python3 -m unittest discover -s tests -v
     timeout 210s python3 scripts/diagnose_drive_ranges.py
 
-The diagnosis reads three small ranges (offsets 0, 1, 0) from each of up to
-three different small files. It checks whether a repeated identical range is
-stable, whether the shifted range matches, and whether an offset was apparently
-ignored. It outputs only status categories and sample counts, not filenames,
-secrets, or file data. A pass across samples is **not** validation for every
-iCloud Drive file or permission to enable unattended archiving. The downloader
-must remain blocked until a robust approach is implemented and live-tested.
+The original range-only diagnosis reads three small ranges (offsets 0, 1, 0)
+from up to three files. It checks repeatability, overlap and ignored offsets.
+The next, more informative **read-only comparison** is:
+
+    python3 scripts/diagnose_drive_downloads.py
+
+This tries at most four 4-KiB-or-larger files, each with a listed size no
+greater than 1 MiB, from named iCloud Drive subfolders only. It reads two
+whole copies and three small ranges per file (offsets 0, 1, 0), classifies
+whether full copies agree, whether their sizes match the listing, and whether
+ranges agree with the full copy. Output and source stderr never contain file
+names or content. The tool caps response memory and runtime; it makes no
+remote mutations and creates no archive files. An iCloud Drive source could
+still change during tests; identical full copies are **not** proof of original
+correctness, and no sample result authorizes Drive archiving.
+
+The diagnostic intentionally returns success after producing classifications,
+even if the results show a mismatch; read its final **Drive archive remains
+BLOCKED** line rather than treating exit code 0 as backup clearance.
+If it reports range inconsistency with stable full downloads, investigate a
+whole-file downloader that strictly validates file identities and stages writes
+atomically. If full lengths differ from listing metadata, classify Apple
+packages separately rather than globally suppress size verification.
 
 ## Live first full-library media pass (2026-11-03)
 
@@ -276,15 +294,18 @@ correctly rejected the incomplete response; the 18 fully published
 files remain in the immutable archive, and the affected file was not
 published as complete. This motivated bounded retry with adaptive smaller
 ranges and a per-pass request budget that includes failed attempts.
-The fix needs live validation before enabling unattended full-library
-archiving. This is separate from the known iCloud Drive overlap mismatch,
-which remains blocked.
+Later live Photos tests passed (41 unit tests, two consecutive successful
+bounded transfers, and a successful first unattended run ending at 19:55 on
+2026-11-03). The Photos timer was enabled locally. This is separate from
+the known iCloud Drive overlap mismatch, which remains blocked.
 
 ## Download budgets and persistent resumption
 
-The full-library Photos, its daily inventory refresh, and iCloud Drive timers
-remain **disabled until explicitly enabled**. The separate incremental
-album timer is installed disabled initially. A full Photos run uses the
+The Photos and daily inventory refresh timers were **enabled locally** on
+2026-11-03 after successful bounded live Photos runs. The iCloud Drive timer
+remains **disabled** pending integrity work. The separate incremental album
+timer was also observed active and may duplicate canonical archive work;
+it has not been modified by this Drive diagnostic. A full Photos run uses the
 locally cached inventory (not a fresh remote listing), then advances
 missing files using read-only rclone byte-range requests. It does not rely on interrupted rclone copy files resuming automatically.
 
