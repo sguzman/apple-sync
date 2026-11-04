@@ -490,6 +490,35 @@ a valid checkpoint, and a no-overwrite atomic publication. The Apple archive
 lock prevents concurrent state mutations, and the job defers while Photos
 or Google Drive backups are active. File names are omitted from logs.
 
+### Opt-in empty-file profile (zero-byte objects, not automated)
+
+The partial inventory has five actual zero-byte file records. Such objects
+cannot be safely inferred from an empty response alone: an interrupted
+or failed download could also return no bytes. The new `--empty` profile
+therefore exercises the same **two separate successful whole-file reads**
+as other cached workers, and verifies both results against the exact
+SHA-256 digest of the empty byte string. The underlying rclone subprocess
+must return success for each read. It then requires unchanged,
+unambiguous **file-not-directory** metadata from a fresh nonrecursive
+parent-folder listing before atomically publishing one zero-byte file.
+It never creates an empty placeholder merely because the remote read failed.
+
+The preview makes no cloud requests or archive writes:
+
+    python3 scripts/drive_cached_batch.py --empty
+
+The separate live form, `--execute --wait-idle --empty`, is
+**not yet approved**; only one zero-byte file may be published per
+run after full-inventory completion and independent QA. The `--empty`
+and `--large` modes are mutually exclusive. Zero-byte files remain
+excluded from the ordinary small/large profiles. Empty native iWork
+documents, ambiguous paths, incomplete inventories, existing destination
+files and symlink targets are excluded. No timers are changed.
+
+This verifies reproducibility of Apple-visible empty bytes, not that
+Apple's backend metadata always reflects the intended original content.
+The remote Drive completeness issue remains independently unresolved.
+
 ### Opt-in large-file profile (8–64 MiB, not automated)
 
 The local-only coverage scan identified **59 files above 8 MiB through
@@ -518,8 +547,8 @@ runtime and output privacy protections apply. The existing 8-MiB default
 cap is unchanged unless `--large` is specified.
 
 **Limitations:** these two matching whole downloads do not prove original
-Apple bytes without a trusted provider checksum. Native Apple documents,
-unknown-size files, empty files, and files above 64 MiB remain blocked;
+Apple bytes without a trusted provider checksum. Native Apple documents, unknown-size files, and files above 64 MiB remain
+blocked; zero-byte files are opt-in only through the separate empty profile;
 large files do not yet resume a partially downloaded whole-file transfer
 across runs. The full Drive download timer remains disabled.
 
