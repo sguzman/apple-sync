@@ -94,7 +94,7 @@ def publish_verified(scope: str, entry: dict, destination: Path,
     if final.exists():
         return 'SKIP_EXISTING'
 
-    remote = scope.rstrip('/') + '/' + entry['Path']
+    remote = scope.rstrip('/') + ('' if scope.endswith(':') else '/') + entry['Path']
     with tempfile.TemporaryDirectory(prefix='.drive-pilot-', dir=state_root) as temp_dir:
         workspace = Path(temp_dir)
         size1, sha1 = whole_reader(remote, workspace / 'first', deadline)
