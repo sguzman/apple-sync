@@ -138,6 +138,42 @@ class DriveStagingTests(unittest.TestCase):
         self.assertNotIn('secret-second', out.getvalue())
         self.assertIn('archive remains BLOCKED', out.getvalue())
 
+    def test_whole_read_accepts_explicit_higher_limit_but_still_bounds_output(self):
+        import hashlib
+        import subprocess
+        import sys
+        original_popen = subprocess.Popen
+        body = b'a' * 3072
+        def fake_popen(_cmd, **kwargs):
+            return original_popen(
+                [sys.executable, '-c',
+                 "import sys;sys.stdout.buffer.write(b'a'*3072)"],
+                **kwargs)
+        with (TemporaryDirectory() as directory,
+              patch.object(mod.diagnosis, 'backup_busy', return_value=False),
+              patch.object(mod.subprocess, 'Popen', side_effect=fake_popen),
+              patch.object(mod, 'MAX_FILE_BYTES', 1024)):
+            root = Path(directory)
+            with self.assertRaisesRegex(mod.VerificationError, 'WHOLE_OVERSIZE'):
+                mod.whole_file('icloud:private', root / 'too_large',
+                               time.monotonic() + 20)
+            size, digest = mod.whole_file(
+                'icloud:private', root / 'allowed',
+                time.monotonic() + 20, max_file_bytes=4096)
+            self.assertEqual((size, digest),
+                             (3072, hashlib.sha256(body).hexdigest()))
+            with self.assertRaisesRegex(mod.VerificationError, 'WHOLE_OVERSIZE'):
+                mod.whole_file('icloud:private', root / 'still_too_large',
+                               time.monotonic() + 20, max_file_bytes=2048)
+
+    def test_invalid_whole_read_limit_fails_before_remote_access(self):
+        with patch.object(mod.diagnosis, 'backup_busy') as busy:
+            with self.assertRaisesRegex(mod.VerificationError,
+                                        'INVALID_WHOLE_FILE_LIMIT'):
+                mod.whole_file('icloud:private', Path('/ignored'),
+                               time.monotonic() + 30, max_file_bytes=0)
+            busy.assert_not_called()
+
     def test_whole_read_enforces_maximum_source_bytes(self):
         import subprocess
         import sys
