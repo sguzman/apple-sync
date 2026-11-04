@@ -337,6 +337,41 @@ whole-file downloader that strictly validates file identities and stages writes
 atomically. If full lengths differ from listing metadata, classify Apple
 packages separately rather than globally suppress size verification.
 
+## Controlled permanent iCloud Drive pilot (2026-11-04)
+
+The 2026-11-04 quarantined Drive staging test passed **72/72 total unit
+tests** and successfully reconstructed two real ordinary files of 7,599,366
+and 4,047,012 bytes. Both reconstructed files matched two independently
+downloaded whole-file copies. The test used temporary paths only.
+
+The next opt-in step permits **at most one ordinary Drive file**, between
+64 KiB and 8 MiB, to be published to its correct location beneath the real
+`/drive/icloud/drive/` archive. This pilot does not unblock the existing
+`archive_batch.py drive --execute` or enable the Drive timer:
+
+    python3 scripts/pilot_drive_archive.py
+    python3 scripts/pilot_drive_archive.py --execute --wait-idle
+
+The first command previews source eligibility without writing archive data.
+The second waits for other backups to be idle, obtains the shared Apple
+archive lock, retrieves **two whole copies** through rclone, and compares
+their sizes and SHA-256 hashes. It re-lists only that small source scope to
+confirm the chosen record's identity is unchanged; it then commits the
+verified bytes via the existing archive checkpoint code to a private staging
+directory on the same filesystem and publishes using the archive's atomic
+hardlink/no-overwrite helper. Once published, it checks the final archive's
+size and SHA-256. The pilot never requests remote byte ranges. It refuses
+symlinks or existing targets; it does not delete existing archive files.
+Temporary staging data is cleaned up on normal exit, and a forced process
+termination could leave incomplete private staging folders for review.
+
+Only one file is attempted per invocation. The pilot deliberately excludes
+native iWork documents and large files pending more testing. It scans only
+selected bounded scopes (`Desktop`, `Downloads`, `read`), not all iCloud
+Drive, so **pilot success is not evidence of complete cloud coverage**.
+The full Drive timer stays disabled. Results are printed without private
+filenames, even when the archive helper publishes a file.
+
 ## Live first full-library media pass (2026-11-03)
 
 After the first persistent inventory succeeded (20,566 records, 52,483,863,139
