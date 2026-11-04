@@ -42,6 +42,23 @@ class DriveReceiptTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(), original_bytes)
             self.assertNotIn(b'checked from two', original_bytes)
 
+    def test_legacy_state_directory_does_not_make_receipts_public(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / 'state'
+            state.mkdir()
+            state.chmod(0o755)  # Existing archive state may predate this worker.
+            original = entry('legacy.bin', b'legacy-content')
+            target = root / 'legacy.bin'
+            data = b'legacy-content'
+            target.write_bytes(data)
+            mod.create_receipt(state, original, hashlib.sha256(data).hexdigest())
+            path = mod.receipt_path(state, original['Path'])
+            self.assertFalse((state / mod.RECEIPT_DIR).stat().st_mode & 0o077)
+            self.assertFalse(path.parent.stat().st_mode & 0o077)
+            self.assertFalse(path.stat().st_mode & 0o077)
+            self.assertEqual(mod.check_receipt(state, original, target), 'verified')
+
     def test_existing_unreceipted_file_is_not_mistaken_for_verified(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
