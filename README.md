@@ -355,8 +355,9 @@ To report the previously saved counts and size without contacting Apple:
 
     python3 scripts/drive_inventory.py
 
-An explicit refresh makes **one bounded recursive** `rclone lsjson icloud:`
-request, streams up to 128 MiB of JSON metadata into a private temporary file,
+An explicit refresh starts **one bounded recursive** `rclone lsjson icloud:`
+command (which may require many Apple API calls), streams up to 128 MiB of
+JSON metadata into a private temporary file,
 and gives the listing up to 25 minutes. Its invocation can first wait for up
 to twelve minutes for Google Drive and existing Photos services to be idle.
 The shared Apple archive lock prevents overlapping archive writes. If a
