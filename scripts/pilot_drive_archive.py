@@ -212,8 +212,8 @@ def run(*, execute: bool = False, wait_idle: bool = False) -> int:
                                               archive.STATE, deadline,
                                               record_receipt=True)
                 except (verification.Deferred, PilotError,
-                        verification.VerificationError, RuntimeError,
-                        OSError, ValueError) as exc:
+                        receipts.ReceiptError, verification.VerificationError,
+                        RuntimeError, OSError, ValueError) as exc:
                     # Do not emit filenames or exception text from rclone.
                     result = ('DEFER_' + str(exc) if isinstance(exc, PilotError)
                               else 'DEFER_READ_OR_STAGING_ERROR')
@@ -247,7 +247,7 @@ def main() -> int:
         parser.error('--wait-idle requires --execute')
     try:
         return run(execute=args.execute, wait_idle=args.wait_idle)
-    except (PilotError, OSError, RuntimeError) as exc:
+    except (PilotError, receipts.ReceiptError, OSError, RuntimeError) as exc:
         # Do not leak private remote paths or rclone error output.
         print('Drive pilot error: validation or local storage unavailable; '
               'unrestricted Drive backup remains BLOCKED', file=sys.stderr)
