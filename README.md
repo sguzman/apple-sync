@@ -391,11 +391,53 @@ and frequent full refreshes are still inappropriate.
 before each download pass.** This snapshot is designed to be reused locally
 by future batches. Unlike Photos, there is no independently established
 cheap, persistent iCloud Drive change-token listing cache in our current
-backend. Accordingly, **no periodic inventory refresh timer is enabled
-or introduced yet**: frequent full rescans would reproduce the original
-inefficiency. Refresh cadence/delta handling remain engineering tasks.
-A successful listing still does not prove Apple exposed every cloud asset,
-nor does a snapshot authorize unattended Drive downloads.
+backend. Accordingly, **no recurring full inventory refresh is enabled**:
+frequent full rescans would reproduce the original inefficiency. An
+optional timer can continue the initial checkpoint only, then do no more
+remote work after the first complete snapshot. Refresh cadence/delta
+handling remain engineering tasks. A successful listing still does not
+prove Apple exposed every cloud asset, nor does a snapshot authorize
+unattended Drive downloads.
+
+### Optional hourly resume timer (not a download timer)
+
+The initial folder walk reached **340 folders completed, 729 pending and
+2,699 records checkpointed** on 2026-11-04. New folders continue to be
+discovered, so no overall completion percentage is valid yet.
+
+To avoid repetitive manual Jobflick jobs, the new
+`apple-sync-drive-inventory.timer` starts the inventory worker at minute
+**05 of each hour**, away from the existing Photos starts at minutes 25
+and 40. The service uses `--execute --resume-only`, a 12-minute per-pass
+enumeration budget, low I/O/CPU scheduling priority, the existing archive
+lock, and the active-backup deferral checks. If the worker finds the
+first complete inventory already present and no pending checkpoint,
+it exits **without making any remote calls**. It does not trigger
+`drive_cached_batch.py`, the unrestricted Drive archive or any Photos
+modification.
+
+The installer adds symlinks to this **optional** service and timer but
+**does not enable it**. After local unit tests pass:
+
+    bash scripts/install.sh
+    systemctl --user enable --now apple-sync-drive-inventory.timer
+
+Read the saved progress at any time without contacting Apple:
+
+    python3 scripts/drive_inventory.py
+
+Or verify the scheduled unit independently:
+
+    systemctl --user list-timers apple-sync-drive-inventory.timer
+
+Disable just the inventory-resume timer (and leave Photos unaffected):
+
+    systemctl --user disable --now apple-sync-drive-inventory.timer
+
+This timer's one-time initial enumeration may still produce many Apple
+metadata requests before it completes. It is **not** an incremental or
+change-token-backed future inventory refresh. Continue treating Drive
+download automation as blocked until explicitly validated.
 
 ## Cached-inventory Drive batch (experimental; opt-in only)
 
