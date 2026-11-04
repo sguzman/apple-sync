@@ -439,6 +439,27 @@ metadata requests before it completes. It is **not** an incremental or
 change-token-backed future inventory refresh. Continue treating Drive
 download automation as blocked until explicitly validated.
 
+## Local Drive coverage report (no Apple requests)
+
+Use the current private metadata snapshot or an **incomplete checkpoint** to
+measure size and type coverage before deciding which transfer mechanisms to
+develop next:
+
+    python3 scripts/report_drive_coverage.py
+
+This is entirely local and read-only. It prints aggregate counts for known
+and unknown-size files, empty and small files, 8–64 MiB, 64 MiB–1 GiB and
+larger files, Apple-native document records, repeated/ambiguous file paths,
+and potential 64 KiB–8 MiB unique ordinary-file candidates. It also reports
+known-size and potentially eligible byte totals. It never outputs source
+filenames, hashes, or private file contents and never contacts rclone or
+systemd. With the in-progress folder walk, it labels all totals as **partial**,
+since the number of yet-undiscovered folders is unknown.
+
+This report makes no changes to the inventory, Photos, archive files,
+automations or timers. Its size buckets are for planning, not approval
+to download any unsupported file type.
+
 ## Cached-inventory Drive batch (experimental; opt-in only)
 
 `scripts/drive_cached_batch.py` prepares the next phase without enabling the
