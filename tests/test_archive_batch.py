@@ -95,10 +95,10 @@ class ChunkTests(unittest.TestCase):
         from contextlib import redirect_stdout
         from io import StringIO
         output = StringIO()
-        with patch.object(mod.sys, 'argv', ['archive_batch.py', 'photos',
-                                           '--execute', '--defer-while-google']), \\
-                patch.object(mod, 'run', side_effect=mod.GoogleDriveBusy()), \\
-                redirect_stdout(output):
+        with (patch.object(mod.sys, 'argv', ['archive_batch.py', 'photos',
+                                            '--execute', '--defer-while-google']),
+              patch.object(mod, 'run', side_effect=mod.GoogleDriveBusy()),
+              redirect_stdout(output)):
             self.assertEqual(mod.main(), 0)
         self.assertIn('DEFER: Google Drive backup is active', output.getvalue())
 
