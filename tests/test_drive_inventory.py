@@ -84,9 +84,10 @@ class DriveInventoryTests(unittest.TestCase):
             root = Path(directory)
             mod.save(root, [file()])
             before = mod.inventory_path(root).read_bytes()
-            with patch.object(mod, 'fetch_listing_to_file',
-                              side_effect=mod.InventoryError('LISTING_FAILED')):
-                with self.assertRaisesRegex(mod.InventoryError, 'LISTING_FAILED'):
+            with (patch.object(mod, 'list_one_folder',
+                               side_effect=mod.InventoryError('FOLDER_LIST_FAILED')),
+                  patch.object(mod.diagnosis, 'backup_busy', return_value=False)):
+                with self.assertRaisesRegex(mod.InventoryError, 'FOLDER_LIST_FAILED'):
                     mod.refresh(root)
             self.assertEqual(mod.inventory_path(root).read_bytes(), before)
 
@@ -94,10 +95,12 @@ class DriveInventoryTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             entries = [file(), file('second.pdf', 222, 'id-2')]
-            with (patch.object(mod, 'fetch_listing_to_file',
+            with (patch.object(mod, 'list_one_folder',
                                return_value=entries) as loader,
+                  patch.object(mod.diagnosis, 'backup_busy', return_value=False),
                   patch.object(mod.archive, 'stream_range') as downloader):
-                stats = mod.refresh(root)
+                complete, stats = mod.refresh(root)
+            self.assertTrue(complete)
             loader.assert_called_once()
             downloader.assert_not_called()
             self.assertEqual(stats['known_bytes'], 12567)
@@ -151,7 +154,7 @@ class DriveInventoryTests(unittest.TestCase):
                                return_value=False),
                   patch.object(mod.subprocess, 'run', return_value=result),
                   patch.object(mod, 'refresh',
-                               return_value=mod.inspect_entries([file()])),
+                               return_value=(True, mod.inspect_entries([file()]))),
                   contextlib.redirect_stdout(output)):
                 self.assertEqual(mod.run(execute=True), 0)
             self.assertTrue((root / '.apple-sync.lock').exists())
