@@ -397,6 +397,41 @@ inefficiency. Refresh cadence/delta handling remain engineering tasks.
 A successful listing still does not prove Apple exposed every cloud asset,
 nor does a snapshot authorize unattended Drive downloads.
 
+## Cached-inventory Drive batch (experimental; opt-in only)
+
+`scripts/drive_cached_batch.py` prepares the next phase without enabling the
+existing unrestricted `apple-sync-batch drive --execute` or a timer.
+
+    python3 scripts/drive_cached_batch.py
+
+This preview uses **only** a complete, private Drive inventory younger than
+30 days, with no Apple network calls, and never tries to use a partial folder
+checkpoint. The completed inventory is necessary; `NO_COMPLETE_SNAPSHOT`
+or `INVENTORY_NOT_CREATED` means the batch stays blocked.
+
+Once the inventory has completed and the verifier has passed local QA,
+the separate, explicitly opt-in command is:
+
+    python3 scripts/drive_cached_batch.py --execute --wait-idle
+
+It processes at most two missing ordinary files per pass, with at most
+three attempts, each 64 KiB to 8 MiB, and reserves at most 24 MiB for
+independent duplicate whole-file reads. Larger files, native Apple formats,
+unknown sizes, repeated paths and existing archive files are excluded.
+Each file must have two matching whole downloads, a current and unique
+metadata identity from a single **nonrecursive parent-folder listing**,
+a valid checkpoint, and a no-overwrite atomic publication. The Apple archive
+lock prevents concurrent state mutations, and the job defers while Photos
+or Google Drive backups are active. File names are omitted from logs.
+
+The ordinary pass performs **no full-root Drive listing**. It never modifies
+iCloud and does not change any systemd unit. The existing unrestricted Drive
+timer remains disabled; full coverage, large-file support, Apple-native files,
+and robust inventory freshness remain future work. A successful limited
+batch must not be mistaken for a full backup. Do **not** run the live
+`--execute` form until the complete inventory and tests are independently
+verified.
+
 ## Controlled permanent iCloud Drive pilot (2026-11-04)
 
 The 2026-11-04 quarantined Drive staging test passed **72/72 total unit
