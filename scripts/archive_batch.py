@@ -25,6 +25,8 @@ CHUNK_BYTES = 8 * 1024 * 1024
 RATE = '512K'
 RUN_SECONDS = 15 * 60
 LIST_SECONDS = 5 * 60
+RANGE_ATTEMPTS = 4
+MIN_RETRY_CHUNK = 256 * 1024
 # Built-in, non-private collections with manageable listings. Albums overlap;
 # this is an incremental subset, NOT a complete iCloud Photos backup.
 PROGRESS_ALBUMS = ('Animated', 'Bursts', 'Panoramas', 'Slo-mo',
@@ -195,6 +197,58 @@ def stream_range(remote: str, offset: int, count: int, temp: Path,
         for block in iter(lambda: source.read(1024 * 1024), b''):
             digest.update(block)
     return digest.hexdigest()
+
+
+def fetch_chunk_with_retry(remote: str, offset: int, first_count: int,
+                           directory: Path, deadline: float, budget: int,
+                           *, defer_google: bool = False, reader=None,
+                           sleeper=None) -> tuple[Path | None, str | None, int, int, bool]:
+    """Fetch one verified chunk with bounded attempts and decreasing size.
+
+    Returns (temp, sha256, committed_length, requested_bytes, exhausted).
+    All failed/short responses are discarded. The byte budget accounts for
+    attempted source bytes, including failures. Only the caller commits
+    successful bytes to persistent staging.
+    """
+    if reader is None:
+        reader = stream_range
+    if sleeper is None:
+        sleeper = time.sleep
+    requested = 0
+    count = first_count
+    for attempt in range(RANGE_ATTEMPTS):
+        if defer_google and google_drive_busy():
+            raise GoogleDriveBusy()
+        remaining = deadline - time.monotonic()
+        if remaining < 15 or requested >= budget:
+            return None, None, 0, requested, attempt > 0
+        count = min(count, budget - requested)
+        fd, filename = tempfile.mkstemp(prefix='.range-', dir=directory)
+        os.close(fd)
+        temporary = Path(filename)
+        requested += count
+        try:
+            digest = reader(remote, offset, count, temporary, remaining - 2)
+        except (RuntimeError, subprocess.TimeoutExpired):
+            temporary.unlink(missing_ok=True)
+            if attempt + 1 >= RANGE_ATTEMPTS or requested >= budget:
+                return None, None, 0, requested, True
+            count = max(MIN_RETRY_CHUNK, count // 2)
+            # Small bounded backoff; do not turn an interruption into an
+            # unbounded retry loop or conceal an unsuccessful transfer.
+            pause = min(2 ** attempt, 4)
+            if deadline - time.monotonic() < pause + 15:
+                return None, None, 0, requested, True
+            print(f'RETRY: incomplete remote range at offset {offset}; '
+                  f'attempt {attempt + 1}/{RANGE_ATTEMPTS}; '
+                  'retrying smaller request', file=sys.stderr, flush=True)
+            sleeper(pause)
+            continue
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
+        return temporary, digest, count, requested, False
+    return None, None, 0, requested, True
 
 
 def commit_chunk(part: Path, meta: Path, state: dict, temp: Path,
@@ -433,6 +487,7 @@ def preview(kind: str, source: str, destination: Path, state_root: Path,
         print('Dry run: no files downloaded')
         return 0
     budget = MAX_BYTES
+    deferred_files = 0
     for item in todo:
         if execute and defer_google and google_drive_busy():
             raise GoogleDriveBusy()
@@ -449,28 +504,35 @@ def preview(kind: str, source: str, destination: Path, state_root: Path,
             with part.open('xb'):
                 pass
             write_json_atomic(meta, state)
+        deferred = False
         while state['committed'] < entry['Size'] and budget > 0:
-            if defer_google and google_drive_busy():
-                raise GoogleDriveBusy()
             remaining = RUN_SECONDS - (time.monotonic() - started)
             if remaining < 15:
                 break
             offset = state['committed']
             count = min(CHUNK_BYTES, budget, entry['Size'] - offset)
             remote = source.rstrip('/') + '/' + item['rel']
-            fd, filename = tempfile.mkstemp(prefix='.range-', dir=part.parent)
-            os.close(fd)
-            temp = Path(filename)
+            temp, digest, accepted, requested, exhausted = fetch_chunk_with_retry(
+                remote, offset, count, part.parent, started + RUN_SECONDS,
+                budget, defer_google=defer_google)
+            budget -= requested
+            if temp is None:
+                if exhausted:
+                    print(f'{kind}: DEFER: remote range incomplete at offset '
+                          f'{offset}; keeping verified partial and continuing '
+                          'with other files', file=sys.stderr, flush=True)
+                    deferred = True
+                break
             try:
-                digest = stream_range(remote, offset, count, temp, remaining - 2)
-                commit_chunk(part, meta, state, temp, offset, count, digest)
-                budget -= count
+                commit_chunk(part, meta, state, temp, offset, accepted, digest)
             finally:
                 temp.unlink(missing_ok=True)
+        if deferred:
+            deferred_files += 1
         if state['committed'] == entry['Size']:
             finish(part, meta, destination, rel, entry['Size'])
-    print(f'{kind}: complete pass; source payload budget remaining {budget} bytes',
-          flush=True)
+    print(f'{kind}: pass ended; source-request budget remaining {budget} bytes; '
+          f'deferred files {deferred_files}; existing chunks retained', flush=True)
     return 0
 
 
