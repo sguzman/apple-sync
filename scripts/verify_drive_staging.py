@@ -62,8 +62,13 @@ def file_digest(path: Path) -> str:
     return h.hexdigest()
 
 
-def whole_file(remote: str, target: Path, deadline: float) -> tuple[int, str]:
+def whole_file(remote: str, target: Path, deadline: float, *,
+               max_file_bytes: int | None = None) -> tuple[int, str]:
     """Bounded direct cat; never trust rclone's advertised file size blindly."""
+    if max_file_bytes is None:
+        max_file_bytes = MAX_FILE_BYTES
+    if type(max_file_bytes) is not int or max_file_bytes < 1:
+        raise VerificationError('INVALID_WHOLE_FILE_LIMIT')
     if diagnosis.backup_busy():
         raise Deferred()
     if deadline - time.monotonic() < 15:
@@ -87,7 +92,7 @@ def whole_file(remote: str, target: Path, deadline: float) -> tuple[int, str]:
                 if not data:
                     break
                 total += len(data)
-                if total > MAX_FILE_BYTES:
+                if total > max_file_bytes:
                     raise VerificationError('WHOLE_OVERSIZE')
                 destination.write(data)
             destination.flush()
