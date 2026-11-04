@@ -478,9 +478,12 @@ the separate, explicitly opt-in command is:
     python3 scripts/drive_cached_batch.py --execute --wait-idle
 
 It processes at most two missing ordinary files per pass, with at most
-three attempts, each 64 KiB to 8 MiB, and reserves at most 24 MiB for
-independent duplicate whole-file reads. Larger files, native Apple formats,
-unknown sizes, repeated paths and existing archive files are excluded.
+three attempts, each **1 byte to 8 MiB**, and reserves at most 24 MiB for
+independent duplicate whole-file reads. Files of zero bytes are deliberately
+deferred until empty-object semantics are verified; larger files, native
+Apple formats, unknown sizes, repeated paths and existing archive files
+are excluded. The pilot command described below still uses its original
+64 KiB minimum; this broader range applies to the *cached worker* only.
 Each file must have two matching whole downloads, a current and unique
 metadata identity from a single **nonrecursive parent-folder listing**,
 a valid checkpoint, and a no-overwrite atomic publication. The Apple archive
@@ -494,6 +497,26 @@ and robust inventory freshness remain future work. A successful limited
 batch must not be mistaken for a full backup. Do **not** run the live
 `--execute` form until the complete inventory and tests are independently
 verified.
+
+### 2026-11-04 local inventory coverage
+
+From the 340-folder partial checkpoint, the local-only report found
+**1,631 file records**: 705 between 64 KiB and 8 MiB, 862 under 64 KiB
+(including five empty files), and 59 above 8 MiB through 64 MiB. No
+Apple-native, unknown-size, or path-collision file records were seen in
+this **partial** snapshot. Total known-size bytes were **1,958,930,705**.
+The 705 previously eligible files contained **816,070,419 bytes**.
+
+Because the majority of discovered files were below the earlier minimum,
+the cached batch now includes nonempty files as small as one byte; it still
+requires two matching whole downloads, stable parent-folder identity,
+verified staging and atomic no-overwrite publication. On this partial
+checkpoint that makes **up to 1,562 of the 1,631 discovered file records**
+potentially eligible by type/size/path, ignoring whether some were already
+archived. This is a candidate count, **not evidence of files backed up**.
+The actual saved inventory remains incomplete, so the batch is still blocked
+from running against these records. Empty files and the 59 large files
+will need separate validation.
 
 ## Controlled permanent iCloud Drive pilot (2026-11-04)
 
