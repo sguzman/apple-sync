@@ -134,6 +134,22 @@ class MeteredDriveTrialTests(unittest.TestCase):
         stop.assert_called_once_with('trial.service')
         self.assertIn('MEASURED IP TOTAL: 0', stdout.getvalue())
 
+    def test_traffic_stop_happens_before_journal_query(self):
+        events = []
+        def stop(_unit):
+            events.append('stop')
+        def log(_unit):
+            events.append('journal')
+        sample = values(8_000_001, 0)
+        with (patch.object(metered, 'start'),
+              patch.object(metered, 'props', return_value=sample),
+              patch.object(metered, 'stop', side_effect=stop),
+              patch.object(metered, 'report_trial_service_log',
+                           side_effect=log),
+              contextlib.redirect_stdout(io.StringIO())):
+            metered.trial('trial.service')
+        self.assertEqual(events, ['stop', 'journal'])
+
     def test_failed_stop_blocks_ledger_commit_by_raising(self):
         failure = subprocess.CompletedProcess([], 1, '', 'systemd unavailable')
         with patch.object(metered, 'run', return_value=failure):
