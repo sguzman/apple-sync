@@ -487,6 +487,11 @@ def main() -> int:
                                                           'photos', 'photos-inventory'):
             fail('--defer-while-google is only supported by Photos workers')
         return run(args.kind, args.execute, defer_google=args.defer_while_google)
+    except GoogleDriveBusy:
+        print('apple-sync: DEFER: Google Drive backup is active; '
+              'Apple transfer stopped safely; any completed chunks remain staged',
+              flush=True)
+        return 0
     except (RuntimeError, OSError, ValueError, json.JSONDecodeError,
             subprocess.SubprocessError) as exc:
         print(f'apple-sync: {exc}', file=sys.stderr)
