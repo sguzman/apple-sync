@@ -35,8 +35,9 @@ class DriveCoverageTests(unittest.TestCase):
         self.assertEqual(data['unknown_size'], 1)
         self.assertEqual(data['apple_native'], 1)
         self.assertEqual(data['ambiguous'], 2)
-        self.assertEqual(data['eligible_files'], 1)
-        self.assertEqual(data['eligible_bytes'], 200000)
+        self.assertEqual(data['eligible_files'], 2)
+        self.assertEqual(data['eligible_bytes'], 200003)
+        self.assertEqual(data['eligible_tiny_files'], 1)
         self.assertEqual(data['under_64k'], 1)
         self.assertEqual(data['empty'], 1)
         self.assertEqual(data['8m_to_64m'], 1)
@@ -59,7 +60,7 @@ class DriveCoverageTests(unittest.TestCase):
                 output = mod.report(state_root=root)
             self.assertIn('PARTIAL_CHECKPOINT', output)
             self.assertIn('1 complete; 1 pending', output)
-            self.assertIn('potential 64 KiB–8 MiB ordinary unique files: 1', output)
+            self.assertIn('potential 1 B–8 MiB ordinary unique files: 1', output)
             self.assertNotIn('SecretFile', output)
 
     def test_completed_inventory_status(self):
@@ -98,9 +99,10 @@ class DriveCoverageTests(unittest.TestCase):
             file('native.pages', 200000),
             file('small.txt', 1000),
             file('valid.bin', 300000)])
-        self.assertEqual(data['eligible_files'], 1)
+        self.assertEqual(data['eligible_files'], 2)
         self.assertEqual(data['unknown_size'], 1)
         self.assertEqual(data['apple_native'], 1)
+        self.assertEqual(data['eligible_tiny_files'], 1)
 
 
 if __name__ == '__main__':
