@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 from contextlib import redirect_stdout
 import fcntl
+import hashlib
 import io
 import json
 import os
@@ -72,7 +73,9 @@ def identity(entry: dict) -> dict:
 def still_same(entry: dict, current: list[dict]) -> bool:
     matches = [candidate for candidate in current
                if candidate.get('Path') == entry['Path']]
-    return len(matches) == 1 and identity(matches[0]) == identity(entry)
+    return (entry.get('IsDir') is False and len(matches) == 1
+            and matches[0].get('IsDir') is False
+            and identity(matches[0]) == identity(entry))
 
 
 def publish_verified(scope: str, entry: dict, destination: Path,
@@ -85,6 +88,8 @@ def publish_verified(scope: str, entry: dict, destination: Path,
         list_reader = listing
     if diagnosis.backup_busy():
         return 'DEFER_BUSY'
+    if entry.get('IsDir') is not False or type(entry.get('Size')) is not int:
+        raise PilotError('INVALID_REMOTE_FILE_METADATA')
     prefix = scope.split(':', 1)[1].strip('/')
     raw = (prefix + '/' if prefix else '') + entry['Path']
     rel = archive.safe_path(raw)
@@ -105,6 +110,13 @@ def publish_verified(scope: str, entry: dict, destination: Path,
             return 'DEFER_SIZE_MISMATCH'
         if sha1 != sha2:
             return 'DEFER_WHOLE_MISMATCH'
+        if entry['Size'] == 0:
+            # A successful zero-length read is meaningful only with the
+            # expected SHA-256 digest of the empty byte string. An rclone
+            # failure or unexpected output must never create a placeholder.
+            empty_digest = hashlib.sha256(b'').hexdigest()
+            if sha1 != empty_digest or sha2 != empty_digest:
+                return 'DEFER_EMPTY_HASH_MISMATCH'
         if diagnosis.backup_busy():
             return 'DEFER_BUSY'
         if not still_same(entry, list_reader(scope, deadline)):
