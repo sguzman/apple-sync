@@ -186,6 +186,36 @@ class CachedBatchTests(unittest.TestCase):
             self.assertIn('1 verified files published', output.getvalue())
             self.assertIn('18874368 bytes', output.getvalue())
 
+    def test_large_synthetic_whole_copies_publish_identical_bytes(self):
+        import hashlib
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / 'state'
+            dest = root / 'drive'
+            state.mkdir()
+            dest.mkdir()
+            size = mod.MAX_FILE_SIZE + 1
+            body = b'R' * size
+            entry = file('large.bin', size)
+            calls = []
+            def whole_reader(remote, target, deadline):
+                calls.append(remote)
+                target.write_bytes(body)
+                return size, hashlib.sha256(body).hexdigest()
+            with patch.object(mod.diagnosis, 'backup_busy', return_value=False):
+                status = mod.pilot.publish_verified(
+                    'icloud:', entry, dest, state,
+                    time.monotonic() + 90,
+                    whole_reader=whole_reader,
+                    list_reader=lambda *_args: [entry])
+            self.assertEqual(status, 'PUBLISHED_VERIFIED')
+            final = dest / 'large.bin'
+            self.assertEqual(final.stat().st_size, size)
+            self.assertEqual(hashlib.sha256(final.read_bytes()).digest(),
+                             hashlib.sha256(body).digest())
+            self.assertEqual(calls, ['icloud:large.bin', 'icloud:large.bin'])
+            self.assertEqual(list(state.iterdir()), [])
+
     def test_large_pass_denied_if_inventory_only_partially_checkpointed(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
