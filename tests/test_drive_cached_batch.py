@@ -41,6 +41,67 @@ class CachedBatchTests(unittest.TestCase):
             self.assertEqual((root / 'folder' / 'existing.bin').read_bytes(),
                              b'kept')
 
+    def test_tiny_nonempty_files_are_eligible_but_zero_length_is_excluded(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            rows = [file('one-byte.txt', 1),
+                    file('two-bytes.txt', 2),
+                    file('four-kib.txt', 4096),
+                    file('zero.txt', 0),
+                    file('empty.pages', 0)]
+            chosen, stats = mod.candidates(rows, root)
+            self.assertEqual([record['Path'] for record in chosen],
+                             ['one-byte.txt', 'two-bytes.txt', 'four-kib.txt'])
+            self.assertEqual(stats['excluded'], 2)
+
+    def test_one_byte_whole_file_archive_preserves_exact_content(self):
+        import hashlib
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest = root / 'drive'
+            state = root / 'state'
+            dest.mkdir()
+            state.mkdir()
+            entry = file('tiny.bin', 1)
+            reads = []
+            def whole(remote, path, _deadline):
+                reads.append(remote)
+                path.write_bytes(b'Z')
+                return 1, hashlib.sha256(b'Z').hexdigest()
+            with patch.object(mod.diagnosis, 'backup_busy', return_value=False):
+                result = mod.pilot.publish_verified(
+                    'icloud:', entry, dest, state,
+                    time.monotonic() + 90, whole_reader=whole,
+                    list_reader=lambda *_args: [entry])
+            self.assertEqual(result, 'PUBLISHED_VERIFIED')
+            self.assertEqual(reads, ['icloud:tiny.bin', 'icloud:tiny.bin'])
+            self.assertEqual((dest / 'tiny.bin').read_bytes(), b'Z')
+            self.assertEqual(list(state.iterdir()), [])
+
+    def test_changed_tiny_file_rejects_publication(self):
+        import hashlib
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest = root / 'drive'
+            state = root / 'state'
+            dest.mkdir()
+            state.mkdir()
+            entry = file('tiny.bin', 1)
+            reads = 0
+            def whole(remote, path, _deadline):
+                nonlocal reads
+                reads += 1
+                body = b'A' if reads == 1 else b'B'
+                path.write_bytes(body)
+                return 1, hashlib.sha256(body).hexdigest()
+            with patch.object(mod.diagnosis, 'backup_busy', return_value=False):
+                result = mod.pilot.publish_verified(
+                    'icloud:', entry, dest, state,
+                    time.monotonic() + 90, whole_reader=whole,
+                    list_reader=lambda *_args: [entry])
+            self.assertEqual(result, 'DEFER_WHOLE_MISMATCH')
+            self.assertFalse((dest / 'tiny.bin').exists())
+
     def test_partial_inventory_fails_closed_without_any_remote_calls(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
