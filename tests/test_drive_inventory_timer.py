@@ -37,7 +37,7 @@ class DriveInventoryTimerTests(unittest.TestCase):
 
     def test_unrestricted_drive_archive_remains_blocked(self):
         archive = (ROOT / 'scripts' / 'archive_batch.py').read_text()
-        self.assertIn("kind == 'drive' and execute", archive)
+        self.assertIn("if execute and kind == 'drive':", archive)
 
 
 if __name__ == '__main__':
