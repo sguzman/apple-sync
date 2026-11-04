@@ -1,0 +1,10 @@
+[Unit]
+Description=Resume initial iCloud Drive metadata inventory (no file downloads)
+ConditionPathIsMountPoint=/drive
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.local/bin/apple-sync-drive-inventory --execute --resume-only
+Nice=15
+IOSchedulingClass=idle
+TimeoutStartSec=16min
