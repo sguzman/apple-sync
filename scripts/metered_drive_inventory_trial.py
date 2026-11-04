@@ -251,15 +251,21 @@ def trial(unit: str, *, stop_at: int = STOP_BYTES) -> tuple[int, int]:
         # vanish after the system service is unloaded.
         print(f'Trial end reason: {reason}', flush=True)
     finally:
+        # Stop the entire service cgroup FIRST. Do not keep Apple network
+        # traffic alive while collecting a journal or querying counters.
         try:
-            data = props(unit)
-            ingress, egress = accounted_bytes(data)
-            largest_ingress = max(largest_ingress, ingress)
-            largest_egress = max(largest_egress, egress)
-        except (TrialError, subprocess.TimeoutExpired, OSError):
-            pass
-        report_trial_service_log(unit)
-        stop(unit)
+            stop(unit)
+        finally:
+            # Some systemd versions unload transient units on stop, so the
+            # last *observed* samples remain the trustworthy lower bound.
+            try:
+                data = props(unit)
+                ingress, egress = accounted_bytes(data)
+                largest_ingress = max(largest_ingress, ingress)
+                largest_egress = max(largest_egress, egress)
+            except (TrialError, subprocess.TimeoutExpired, OSError):
+                pass
+            report_trial_service_log(unit)
         print(f'MEASURED IP INGRESS: {largest_ingress} bytes', flush=True)
         print(f'MEASURED IP EGRESS: {largest_egress} bytes', flush=True)
         print(f'MEASURED IP TOTAL: '
