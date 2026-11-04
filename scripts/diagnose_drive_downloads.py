@@ -7,6 +7,7 @@ changes systemd units. This is a diagnosis, NOT approval to enable backups.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import selectors
@@ -27,6 +28,11 @@ READ_SECONDS = 40
 RATE = '512K'
 MAX_LISTING_OUTPUT = 8 * 1024 * 1024
 MAX_DOWNLOAD_OUTPUT = 2 * 1024 * 1024
+EXTENDED_MAX_CANDIDATES = 8
+EXTENDED_MAX_PER_SCOPE = 4
+EXTENDED_TOTAL_SECONDS = 420
+EXTENDED_SAMPLE_BYTES = 16 * 1024
+BUSY_UNITS = ('google-drive-rclone.service', 'apple-sync-photos.service')
 
 
 class ReadFailure(Exception):
@@ -51,6 +57,42 @@ def select_files(entries: object) -> list[dict]:
     # Prefer ordinary files for control samples; do not assume that all
     # iWork packages are represented as ordinary files by the backend.
     return sorted(selected, key=lambda e: (is_iwork(e['Path']), e['Size']))
+
+
+def varied_files(entries: list[dict], limit: int) -> list[dict]:
+    """Spread selected samples over source sizes without logging path names."""
+    if not entries or limit < 1:
+        return []
+    sizes = sorted(entries, key=lambda item: item['Size'])
+    indexes = [0, len(sizes) - 1, len(sizes) // 2,
+               len(sizes) // 4, 3 * len(sizes) // 4]
+    choices = [sizes[index] for index in indexes]
+    choices += [item for item in sizes if is_iwork(item['Path'])]
+    choices += sizes
+    selected, seen = [], set()
+    for item in choices:
+        if item['Path'] in seen:
+            continue
+        selected.append(item)
+        seen.add(item['Path'])
+        if len(selected) == limit:
+            break
+    return selected
+
+
+def backup_busy() -> bool:
+    """Fail closed on uncertainty before competing with other download jobs."""
+    for unit in BUSY_UNITS:
+        try:
+            result = subprocess.run(
+                ['systemctl', '--user', 'show', unit,
+                 '--property=ActiveState', '--value', '--no-pager'],
+                capture_output=True, text=True, check=False, timeout=8)
+        except (OSError, subprocess.TimeoutExpired):
+            return True
+        if result.returncode or result.stdout.strip() not in ('inactive', 'failed'):
+            return True
+    return False
 
 
 def is_iwork(path: str) -> bool:
@@ -101,7 +143,7 @@ def run_rclone(args: list[str], seconds: float) -> bytes:
 
 def inspect(whole_first: bytes, whole_again: bytes,
             zero_first: bytes, one: bytes, zero_again: bytes,
-            listed_size: int) -> tuple[str, str]:
+            listed_size: int, *, sample_bytes: int = SAMPLE_BYTES) -> tuple[str, str]:
     """Two independent whole downloads are the reference, not ground truth."""
     if whole_first != whole_again:
         whole_status = 'WHOLE_DOWNLOADS_DISAGREE'
@@ -110,7 +152,7 @@ def inspect(whole_first: bytes, whole_again: bytes,
     else:
         whole_status = 'WHOLE_STABLE_MATCHES_SIZE'
 
-    n = min(SAMPLE_BYTES, listed_size - 1)
+    n = min(sample_bytes, listed_size - 1)
     if any(len(data) != n for data in (zero_first, one, zero_again)):
         range_status = 'RANGE_WRONG_LENGTH'
     elif zero_first != zero_again:
@@ -129,7 +171,8 @@ def inspect(whole_first: bytes, whole_again: bytes,
     return whole_status, range_status
 
 
-def examine(remote: str, size: int, deadline: float) -> tuple[str, str]:
+def examine(remote: str, size: int, deadline: float,
+            *, extended: bool = False) -> tuple[str, str]:
     """Bounded, in-memory reads; raw content never reaches output."""
     def read(offset: int | None = None, count: int | None = None) -> bytes:
         args = ['cat', remote]
@@ -139,26 +182,41 @@ def examine(remote: str, size: int, deadline: float) -> tuple[str, str]:
             args.extend(['--count', str(count)])
         return run_rclone(args, deadline - time.monotonic())
 
-    n = min(SAMPLE_BYTES, size - 1)
+    n = min(EXTENDED_SAMPLE_BYTES if extended else SAMPLE_BYTES, size - 1)
     try:
         whole_first = read()
         whole_again = read()
         first = read(0, n)
         second = read(1, n)
         again = read(0, n)
+        middle_offset = max(0, (size - min(SAMPLE_BYTES, size)) // 2)
+        middle_count = min(SAMPLE_BYTES, size - middle_offset)
+        middle = read(middle_offset, middle_count) if extended else None
     except ReadFailure as exc:
         return ('INCONCLUSIVE_READ_ERROR', str(exc))
-    return inspect(whole_first, whole_again, first, second, again, size)
+    whole, ranges = inspect(whole_first, whole_again, first, second, again,
+                            size, sample_bytes=n)
+    if extended and middle is not None and ranges == 'RANGE_AGREES_WITH_WHOLE':
+        if middle != whole_first[middle_offset:middle_offset + middle_count]:
+            ranges = 'RANGE_MIDDLE_DISAGREES_WITH_WHOLE'
+    return whole, ranges
 
 
-def diagnose() -> int:
-    deadline = time.monotonic() + TOTAL_SECONDS
+def diagnose(*, extended: bool = False) -> int:
+    deadline = time.monotonic() + (
+        EXTENDED_TOTAL_SECONDS if extended else TOTAL_SECONDS)
+    candidate_limit = EXTENDED_MAX_CANDIDATES if extended else MAX_CANDIDATES
+    per_scope = EXTENDED_MAX_PER_SCOPE if extended else MAX_PER_SCOPE
+    if extended and backup_busy():
+        print('Drive diagnostic DEFER: a backup is active or its state is unknown; '
+              'no source reads attempted', flush=True)
+        return 0
     checked = 0
     clean = 0
     differences = 0
     saw_iwork = False
     for scope in SCOPES:
-        if checked >= MAX_CANDIDATES or deadline - time.monotonic() < 15:
+        if checked >= candidate_limit or deadline - time.monotonic() < 15:
             break
         print('Drive: listing one limited scope; names and contents withheld',
               flush=True)
@@ -171,15 +229,22 @@ def diagnose() -> int:
         except (ReadFailure, ValueError, json.JSONDecodeError):
             print('Drive: scope unavailable or inconclusive', flush=True)
             continue
-        for entry in entries[:MAX_PER_SCOPE]:
-            if checked >= MAX_CANDIDATES or deadline - time.monotonic() < 15:
+        selections = (varied_files(entries, per_scope) if extended
+                      else entries[:per_scope])
+        for entry in selections:
+            if checked >= candidate_limit or deadline - time.monotonic() < 15:
+                break
+            if extended and backup_busy():
+                print('Drive diagnostic DEFER: another backup became active; '
+                      'stopping read-only sampling', flush=True)
                 break
             checked += 1
             iwork = is_iwork(entry['Path'])
             saw_iwork |= iwork
             category = 'iWork-like' if iwork else 'ordinary'
             remote = scope.rstrip('/') + '/' + entry['Path']
-            whole, ranges = examine(remote, entry['Size'], deadline)
+            whole, ranges = examine(remote, entry['Size'], deadline,
+                                     extended=extended)
             ok = (whole == 'WHOLE_STABLE_MATCHES_SIZE'
                   and ranges == 'RANGE_AGREES_WITH_WHOLE')
             clean += int(ok)
@@ -204,5 +269,14 @@ def diagnose() -> int:
     return 0
 
 
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--extended', action='store_true',
+                        help='more varied small files and 16-KiB/mid-file ranges; '
+                        'defer while other backups are active')
+    args = parser.parse_args()
+    return diagnose(extended=args.extended)
+
+
 if __name__ == '__main__':
-    raise SystemExit(diagnose())
+    raise SystemExit(main())
