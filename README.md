@@ -270,11 +270,26 @@ This tries at most four 4-KiB-or-larger files, each with a listed size no
 greater than 1 MiB, from named iCloud Drive subfolders only. It reads two
 whole copies and three small ranges per file (offsets 0, 1, 0), classifies
 whether full copies agree, whether their sizes match the listing, and whether
-ranges agree with the full copy. Output and source stderr never contain file
-names or content. The tool caps response memory and runtime; it makes no
-remote mutations and creates no archive files. An iCloud Drive source could
-still change during tests; identical full copies are **not** proof of original
-correctness, and no sample result authorizes Drive archiving.
+ranges agree with the full copy. After two consistent ordinary-file samples
+on 2026-11-03, the expanded follow-up is:
+
+    python3 scripts/diagnose_drive_downloads.py --extended
+
+The expanded mode samples up to eight files from the same limited directory
+scopes (maximum four per scope), spreads selection across smaller/larger files,
+and compares the whole-file copies to overlapping ranges as large as 16 KiB
+plus a middle-of-file read. The 16-KiB test mirrors the size of the original
+mismatched range probe, which later smaller samples did not reproduce. It
+checks local Google and Apple Photos backup activity before and during probing,
+and defers if either is running or its state cannot be checked. It caps total
+wall time to 420 seconds and performs no archive writes. It does not scan the
+entire iCloud Drive and may still miss problematic formats or folders.
+
+Both modes suppress remote stderr, never print file names or content, and cap
+response memory and runtime; they make no remote mutations or archive writes.
+An iCloud Drive source could still change during tests; identical full copies
+are **not** proof of original correctness, and no sample result authorizes
+Drive archiving.
 
 The diagnostic intentionally returns success after producing classifications,
 even if the results show a mismatch; read its final **Drive archive remains
