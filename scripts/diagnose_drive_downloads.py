@@ -8,6 +8,8 @@ changes systemd units. This is a diagnosis, NOT approval to enable backups.
 from __future__ import annotations
 
 import json
+import os
+import selectors
 import subprocess
 import time
 from pathlib import PurePosixPath
@@ -23,6 +25,8 @@ TOTAL_SECONDS = 240
 LIST_SECONDS = 25
 READ_SECONDS = 40
 RATE = '512K'
+MAX_LISTING_OUTPUT = 8 * 1024 * 1024
+MAX_DOWNLOAD_OUTPUT = 2 * 1024 * 1024
 
 
 class ReadFailure(Exception):
@@ -54,20 +58,45 @@ def is_iwork(path: str) -> bool:
 
 
 def run_rclone(args: list[str], seconds: float) -> bytes:
+    """Memory- and time-bounded rclone read; suppress sensitive stderr."""
     if seconds <= 2:
         raise ReadFailure('TIME_BUDGET')
+    command = ['rclone', *args, '--bwlimit', RATE, '--retries', '1',
+               '--low-level-retries', '1', '--log-level', 'ERROR']
+    output_limit = (MAX_LISTING_OUTPUT if args[0] == 'lsjson'
+                    else MAX_DOWNLOAD_OUTPUT)
+    deadline = time.monotonic() + min(seconds, READ_SECONDS)
     try:
-        result = subprocess.run(
-            ['rclone', *args, '--bwlimit', RATE, '--retries', '1',
-             '--low-level-retries', '1', '--log-level', 'ERROR'],
-            capture_output=True, check=False, timeout=min(seconds, READ_SECONDS))
-    except subprocess.TimeoutExpired as exc:
-        raise ReadFailure('READ_TIMEOUT') from exc
+        proc = subprocess.Popen(command, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL)
     except OSError as exc:
         raise ReadFailure('LOCAL_COMMAND_ERROR') from exc
-    if result.returncode:
-        raise ReadFailure('RCLONE_READ_ERROR')
-    return result.stdout
+    data = bytearray()
+    try:
+        with selectors.DefaultSelector() as selector:
+            selector.register(proc.stdout, selectors.EVENT_READ)
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not selector.select(remaining):
+                    raise ReadFailure('READ_TIMEOUT')
+                piece = os.read(proc.stdout.fileno(), 65536)
+                if not piece:
+                    break
+                data.extend(piece)
+                if len(data) > output_limit:
+                    raise ReadFailure('OUTPUT_TOO_LARGE')
+        try:
+            code = proc.wait(timeout=max(0.1, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired as exc:
+            raise ReadFailure('READ_TIMEOUT') from exc
+        if code:
+            raise ReadFailure('RCLONE_READ_ERROR')
+        return bytes(data)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        proc.stdout.close()
 
 
 def inspect(whole_first: bytes, whole_again: bytes,
