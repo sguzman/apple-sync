@@ -52,7 +52,12 @@ def _private_directory(path: Path, *, create: bool = False) -> bool:
 
 
 def _parent(state_root: Path, remote_path: str, *, create: bool) -> Path | None:
-    if not _private_directory(state_root, create=False):
+    # The state directory may predate this feature and have more permissive
+    # directory mode. Require that it is a real directory; all newly created
+    # receipt-specific directories themselves must be private mode 0700.
+    if state_root.is_symlink():
+        raise ReceiptError('UNSAFE_RECEIPT_DIRECTORY')
+    if not state_root.is_dir():
         if create:
             raise ReceiptError('MISSING_STATE_DIRECTORY')
         return None
