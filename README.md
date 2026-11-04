@@ -303,6 +303,35 @@ Drive archiving.
 The diagnostic intentionally returns success after producing classifications,
 even if the results show a mismatch; read its final **Drive archive remains
 BLOCKED** line rather than treating exit code 0 as backup clearance.
+
+### Quarantined Drive staging verification (2026-11-04)
+
+The 2026-11-04 extended diagnostic completed with **5/5 ordinary files**
+reporting stable whole-file reads, matching advertised sizes, consistent 16-KiB
+overlaps and middle-of-file ranges. No iWork package was included and the
+older failing sample was not conclusively reproduced. Drive remains blocked.
+
+The next validation checks more than remote ranges: it exercises the actual
+archive's chunk download, SHA-256 checkpoint, resumed state verification,
+and no-overwrite atomic publication on up to two small Drive files:
+
+    python3 scripts/verify_drive_staging.py --wait-idle
+
+The script reads limited non-recursive-to-root folder scopes, chooses eligible
+64-KiB-to-8-MiB files, downloads each whole file twice, reconstructs it in
+multiple bounded chunks with the production staging helpers, then compares the
+assembled file's SHA-256 against both independently downloaded whole copies.
+**Every staging file and synthetic published test file is under a disposable
+temporary directory; the real archive and all user-systemd units are untouched.**
+Private source filenames, hashes and bytes are never printed. The test waits
+up to twelve minutes for an idle window if requested, then has an eight-minute
+source-read budget. It stops if another backup becomes active. Network reads
+do not modify iCloud; no iCloud Drive timer is enabled by this test.
+
+Results are classifications, not authorization to run a full unattended Drive
+backup. Whole files matching each other cannot prove fidelity to Apple's
+original when the remote does not supply a trusted content hash. Specialized
+iWork documents and bigger files still need dedicated testing.
 If it reports range inconsistency with stable full downloads, investigate a
 whole-file downloader that strictly validates file identities and stages writes
 atomically. If full lengths differ from listing metadata, classify Apple
