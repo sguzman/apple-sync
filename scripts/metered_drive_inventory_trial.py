@@ -169,10 +169,15 @@ def worker_entry() -> int:
     before allowing the original inventory worker to run unchanged.
     """
     for unit in BUSY_UNITS:
-        result = run(
-            ['systemctl', '--user', 'show', unit,
-             '--property=ActiveState', '--value', '--no-pager'],
-            timeout=8, check=False)
+        try:
+            result = run(
+                ['systemctl', '--user', 'show', unit,
+                 '--property=ActiveState', '--value', '--no-pager'],
+                timeout=8, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            print(f'TRIAL_BLOCKED: USER_MANAGER_STATUS_UNAVAILABLE {unit}',
+                  flush=True)
+            return 3
         state = result.stdout.strip()
         if result.returncode != 0 or state not in ('inactive', 'failed', 'active',
                                                     'activating', 'deactivating'):
