@@ -113,9 +113,12 @@ def start(unit: str, args: list[str], *, with_user: bool,
 
 
 def stop(unit: str) -> None:
-    # Best effort even if the service already exited; never keep scanning
-    # merely because the controller hit an exception.
-    run(['systemctl', '--system', 'stop', unit], timeout=15, check=False)
+    # A failed stop must leave the durable ledger pending. Otherwise the
+    # controller might record a completed run while systemd keeps scanning.
+    response = run(['systemctl', '--system', 'stop', unit],
+                   timeout=15, check=False)
+    if response.returncode:
+        raise TrialError('SYSTEMD_STOP_UNCONFIRMED')
     run(['systemctl', '--system', 'reset-failed', unit],
         timeout=5, check=False)
 
