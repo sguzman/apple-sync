@@ -460,6 +460,35 @@ This report makes no changes to the inventory, Photos, archive files,
 automations or timers. Its size buckets are for planning, not approval
 to download any unsupported file type.
 
+## Read-only archive audit (inventory size comparison only)
+
+The backup worker skips existing destination paths to prevent overwrites,
+but **existence alone is not evidence of a verified backup**. The
+`scripts/audit_drive_archive.py` utility compares archive file existence
+and sizes against either the saved partial inventory checkpoint or the
+completed inventory:
+
+    python3 scripts/audit_drive_archive.py
+
+It checks that `/drive` is mounted as writable ext4 before inspecting files,
+refuses symlink targets and symlink parent directories, and summarizes
+missing files, wrong-sized files, ambiguous paths, existing regular files,
+and count/bytes of files matching the advertised cloud size. It prints
+aggregate counts only—no filenames or hashes. It does not open files for
+writing, contact Apple, download media, or change archive service state.
+
+**A size match is never labeled cryptographically verified**. This utility
+does not yet maintain a durable receipt tying each locally published file
+to its two remote whole-file SHA-256 checks. A file can be the correct
+size and still contain wrong data. Earlier pilot-verified files without
+such receipts must not be automatically counted as cryptographically
+certified by this audit. Existing files absent from the *partial* cloud
+inventory are also outside its denominator.
+
+The next integrity milestone is durable per-file verification receipts
+and safe revalidation for pre-existing files. Full backup completeness
+remains blocked until inventory and receipt coverage are established.
+
 ## Cached-inventory Drive batch (experimental; opt-in only)
 
 `scripts/drive_cached_batch.py` prepares the next phase without enabling the
