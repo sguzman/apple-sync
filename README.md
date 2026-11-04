@@ -464,7 +464,14 @@ The *explicitly approved* one-time command is:
 The helper first confirms a real `/drive` mount and a disabled
 user inventory timer. It runs a four-second, no-Apple service accounting
 preflight and checks for numeric ingress and egress counters. If
-unavailable, it refuses to launch the scanner. It then starts one
+unavailable, it refuses to launch the scanner. The transient system
+service receives the original user's XDG runtime directory and D-Bus
+session address, independently checks each backup service through the
+**same user-manager context** used by the scanner, and prints whether
+each is inactive, active, or inaccessible. It fails closed on active or
+unreachable services; it never disables concurrent backups. After the
+trial it relays only sanitized worker status and deferral lines from
+the system journal. It then starts one
 ephemeral 90-second scanner invocation with a 10,000,000-byte
 combined ingress+egress **advisory budget** and polls systemd counters
 four times per second. It stops the complete service cgroup at
