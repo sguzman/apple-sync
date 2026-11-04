@@ -90,10 +90,12 @@ def start(unit: str, args: list[str], *, with_user: bool,
         '--property=NoNewPrivileges=yes',
     ]
     if with_user:
+        user = pwd.getpwnam(USER)
         command += [
             '--property=User=' + USER,
             '--property=WorkingDirectory=' + str(REPO),
-            '--setenv=HOME=' + pwd.getpwnam(USER).pw_dir,
+            '--setenv=HOME=' + user.pw_dir,
+            '--setenv=XDG_RUNTIME_DIR=/run/user/' + str(user.pw_uid),
         ]
     run(command + args, timeout=15)
 
@@ -126,9 +128,13 @@ def guard_setup() -> None:
                'systemctl', '--user', 'is-active',
                'apple-sync-drive-inventory.timer']
     check = run(command, timeout=8, check=False)
-    if check.returncode == 0 and check.stdout.strip() == 'active':
+    state = check.stdout.strip()
+    if check.returncode == 0 and state == 'active':
         raise TrialError('USER_INVENTORY_TIMER_STILL_ACTIVE')
-    if check.returncode not in (0, 3):
+    # A disabled/unlinked timer can appear as inactive (3) or
+    # unknown/not-found (4) depending on whether it remains loaded.
+    if not (check.returncode in (3, 4)
+            and state in ('inactive', 'unknown', 'failed')):
         raise TrialError('CANNOT_VALIDATE_USER_TIMER_STATE')
 
 
