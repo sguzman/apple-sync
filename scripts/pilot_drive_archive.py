@@ -22,6 +22,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import archive_batch as archive
+import drive_receipts as receipts
 import diagnose_drive_downloads as diagnosis
 import verify_drive_staging as verification
 
@@ -80,7 +81,8 @@ def still_same(entry: dict, current: list[dict]) -> bool:
 
 def publish_verified(scope: str, entry: dict, destination: Path,
                      state_root: Path, deadline: float,
-                     *, whole_reader=None, list_reader=None) -> str:
+                     *, whole_reader=None, list_reader=None,
+                     record_receipt: bool = False) -> str:
     """Only an independently verified, unchanged source may be published."""
     if whole_reader is None:
         whole_reader = verification.whole_file
@@ -148,10 +150,19 @@ def publish_verified(scope: str, entry: dict, destination: Path,
         # overwrites. Suppress private remote paths in human-facing output.
         with redirect_stdout(io.StringIO()):
             archive.finish(part, meta, destination, rel, size1)
+        # archive.finish leaves the stage in place when a competing file
+        # won a no-overwrite race. Never attest or claim that publication.
+        if part.exists():
+            return 'SKIP_EXISTING'
         if not final.exists():
             return 'DEFER_PUBLICATION_FAILED'
         if final.stat().st_size != size1 or verification.file_digest(final) != sha1:
             raise PilotError('PUBLISHED_FILE_VERIFICATION_FAILED')
+        if record_receipt:
+            # Write only after confirming the newly published destination
+            # matches both independent whole-file reads. Receipt failures
+            # leave the archive file intact but never claim a receipt.
+            receipts.create_receipt(state_root, {**entry, 'Path': raw}, sha1)
         return 'PUBLISHED_VERIFIED'
 
 
@@ -198,7 +209,8 @@ def run(*, execute: bool = False, wait_idle: bool = False) -> int:
                     return 0
                 try:
                     result = publish_verified(scope, entry, destination,
-                                              archive.STATE, deadline)
+                                              archive.STATE, deadline,
+                                              record_receipt=True)
                 except (verification.Deferred, PilotError,
                         verification.VerificationError, RuntimeError,
                         OSError, ValueError) as exc:
