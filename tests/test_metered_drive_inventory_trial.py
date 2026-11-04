@@ -134,6 +134,13 @@ class MeteredDriveTrialTests(unittest.TestCase):
         stop.assert_called_once_with('trial.service')
         self.assertIn('MEASURED IP TOTAL: 0', stdout.getvalue())
 
+    def test_failed_stop_blocks_ledger_commit_by_raising(self):
+        failure = subprocess.CompletedProcess([], 1, '', 'systemd unavailable')
+        with patch.object(metered, 'run', return_value=failure):
+            with self.assertRaisesRegex(
+                    metered.TrialError, 'SYSTEMD_STOP_UNCONFIRMED'):
+                metered.stop('apple-sync-drive-metered-test.service')
+
     def test_missing_original_worker_refuses_trial_before_service_start(self):
         with (patch.object(metered.os, 'geteuid', return_value=0),
               patch.object(metered, 'WORKER', Path('/nonexistent/worker')),
