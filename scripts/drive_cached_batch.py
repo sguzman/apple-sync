@@ -22,7 +22,9 @@ import drive_inventory as inventory
 import pilot_drive_archive as pilot
 
 MAX_FILE_SIZE = pilot.MAX_PILOT_BYTES
-MIN_FILE_SIZE = pilot.verification.MIN_FILE_BYTES
+# Whole-file verification does not depend on a 64-KiB lower bound.
+# Exclude true zero-byte files until explicit empty-object semantics are tested.
+MIN_FILE_SIZE = 1
 MAX_FILES = 2
 MAX_ATTEMPTS = 3
 MAX_SOURCE_BYTES = 24 * 1024 * 1024
