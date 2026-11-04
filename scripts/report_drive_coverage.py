@@ -61,9 +61,11 @@ def summarize(entries: list[dict]) -> dict[str, int]:
             else:
                 totals['over_1g'] += 1
         if (not native and not ambiguous and type(size) is int
-                and MIN_SMALL <= size <= MAX_SMALL):
+                and 1 <= size <= MAX_SMALL):
             totals['eligible_files'] += 1
             totals['eligible_bytes'] += size
+            if size < MIN_SMALL:
+                totals['eligible_tiny_files'] += 1
     return dict(totals)
 
 
@@ -101,7 +103,8 @@ def report(*, state_root: Path | None = None) -> str:
         ('over_1g', 'files above 1 GiB'),
         ('apple_native', 'Apple-native records (overlapping category)'),
         ('ambiguous', 'repeated-path file records (overlapping category)'),
-        ('eligible_files', 'potential 64 KiB–8 MiB ordinary unique files'),
+        ('eligible_tiny_files', 'potential 1 B–under 64 KiB ordinary unique files'),
+        ('eligible_files', 'potential 1 B–8 MiB ordinary unique files'),
     )
     lines = [f'Drive coverage: {phase} (local metadata only)',
              f'Discovered records: {len(entries)}']
