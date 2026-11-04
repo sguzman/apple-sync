@@ -174,6 +174,32 @@ class DriveStagingTests(unittest.TestCase):
                                time.monotonic() + 30, max_file_bytes=0)
             busy.assert_not_called()
 
+    def test_empty_whole_read_checks_process_exit_before_accepting_zero_bytes(self):
+        import hashlib
+        import subprocess
+        import sys
+        actual_popen = subprocess.Popen
+        def empty_success(_cmd, **kwargs):
+            return actual_popen([sys.executable, '-c', 'pass'], **kwargs)
+        def empty_failure(_cmd, **kwargs):
+            return actual_popen([sys.executable, '-c',
+                                 'import sys;sys.exit(7)'], **kwargs)
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            with (patch.object(mod.diagnosis, 'backup_busy', return_value=False),
+                  patch.object(mod.subprocess, 'Popen', side_effect=empty_success)):
+                size, digest = mod.whole_file(
+                    'icloud:private-zero', root / 'real_zero',
+                    time.monotonic() + 30, max_file_bytes=1)
+            self.assertEqual(size, 0)
+            self.assertEqual(digest, hashlib.sha256(b'').hexdigest())
+            with (patch.object(mod.diagnosis, 'backup_busy', return_value=False),
+                  patch.object(mod.subprocess, 'Popen', side_effect=empty_failure)):
+                with self.assertRaisesRegex(mod.VerificationError,
+                                            'WHOLE_DOWNLOAD_ERROR'):
+                    mod.whole_file('icloud:private-zero', root / 'failed',
+                                   time.monotonic() + 30, max_file_bytes=1)
+
     def test_whole_read_enforces_maximum_source_bytes(self):
         import subprocess
         import sys
