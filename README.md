@@ -490,6 +490,39 @@ a valid checkpoint, and a no-overwrite atomic publication. The Apple archive
 lock prevents concurrent state mutations, and the job defers while Photos
 or Google Drive backups are active. File names are omitted from logs.
 
+### Opt-in large-file profile (8–64 MiB, not automated)
+
+The local-only coverage scan identified **59 files above 8 MiB through
+64 MiB**, totaling much of the as-yet-indexed Drive bytes. An additional
+`--large` mode now selects these ordinary, unambiguous, known-size files
+without changing the normal small-file cap:
+
+    python3 scripts/drive_cached_batch.py --large
+
+The above command is a **read-only preview** using the same fully complete
+inventory prerequisite as the ordinary cached batch. It performs no cloud
+requests or archive writes. Once the full inventory and new tests are
+verified, an explicitly requested live large-file test can use
+`--execute --wait-idle --large`; do not schedule or run that command
+until local QA is reviewed.
+
+The large mode handles **at most one file per pass** (up to two attempts).
+It permits files larger than 8 MiB and no larger than 64 MiB. It permits up
+to **128 MiB of source reads reserved per pass**, because each candidate
+is retrieved twice as an independent, rate-limited whole-file download;
+each whole-file read enforces its own hard 64-MiB cap. The two files must
+match in size and SHA-256, the source's parent-folder metadata must still
+match, and publication uses the existing private checkpoint and atomic
+no-overwrite path. The same shared lock, active-backup deferral, bounded
+runtime and output privacy protections apply. The existing 8-MiB default
+cap is unchanged unless `--large` is specified.
+
+**Limitations:** these two matching whole downloads do not prove original
+Apple bytes without a trusted provider checksum. Native Apple documents,
+unknown-size files, empty files, and files above 64 MiB remain blocked;
+large files do not yet resume a partially downloaded whole-file transfer
+across runs. The full Drive download timer remains disabled.
+
 The ordinary pass performs **no full-root Drive listing**. It never modifies
 iCloud and does not change any systemd unit. The existing unrestricted Drive
 timer remains disabled; full coverage, large-file support, Apple-native files,
