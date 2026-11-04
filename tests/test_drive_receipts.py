@@ -93,7 +93,8 @@ class DriveReceiptTests(unittest.TestCase):
             state.mkdir(mode=0o700)
             original = entry('file.bin', b'x')
             path = mod.receipt_path(state, original['Path'])
-            path.parent.mkdir(mode=0o700, parents=True)
+            (state / mod.RECEIPT_DIR).mkdir(mode=0o700)
+            path.parent.mkdir(mode=0o700)
             path.symlink_to(root / 'nonexistent')
             self.assertEqual(mod.check_receipt(
                 state, original, root / 'file.bin'), 'invalid')
