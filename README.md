@@ -439,61 +439,76 @@ metadata requests before it completes. It is **not** an incremental or
 change-token-backed future inventory refresh. Continue treating Drive
 download automation as blocked until explicitly validated.
 
-## Metered, one-time Drive inventory trial (administrative opt-in)
+## Metered, cumulative-budget Drive inventory (administrative opt-in)
 
-Because the previous hourly **user** service had `IPAccounting=no`
-and showed no ingress/egress data, its past bandwidth cannot be
-reconstructed. A deliberately separate, root-run helper can make
-**one measured trial** using a transient **system** service, with
-`IPAccounting=yes` and `User=sguzman`. The worker still runs as
-the regular user, uses the same existing source/checkpoint and backup
-locks, and never starts the Drive download worker.
+The old hourly **user** inventory service has no IP-accounting history;
+historical bandwidth consumption cannot be reconstructed. The owner
+measured one prior 90-second sample: **469,066 ingress + 368,241 egress =
+837,307 IP bytes** over 12 completed folders. That historical measurement is
+reported separately; the new ledger starts at **zero when first installed**,
+so its totals must never be called all-time traffic.
 
-The previously enabled hourly user timer must remain **disabled**:
+A root-run controller can launch the ordinary user's inventory worker in a
+**transient system service** with `IPAccounting=yes`. It preserves the
+existing resumable inventory checkpoint and backup-idleness checks; it
+does not enable the unrestricted Drive downloader or the original hourly
+inventory timer. Other backup services are never stopped or modified.
+
+The original user timer must remain disabled:
 
     systemctl --user show apple-sync-drive-inventory.timer -p ActiveState
 
-Preview the exact trial parameters without doing anything:
+Preview without root, Apple requests or ledger writes:
 
     python3 scripts/metered_drive_inventory_trial.py
 
-The *explicitly approved* one-time command is:
+Read the persistent budget without contacting Apple:
 
-    sudo -n /usr/bin/python3 scripts/metered_drive_inventory_trial.py --execute
+    sudo /usr/bin/python3 scripts/metered_drive_inventory_trial.py --status
 
-The helper first confirms a real `/drive` mount and a disabled
-user inventory timer. It runs a four-second, no-Apple service accounting
-preflight and checks for numeric ingress and egress counters. If
-unavailable, it refuses to launch the scanner. The transient system
-service receives the original user's XDG runtime directory and D-Bus
-session address, independently checks each backup service through the
-**same user-manager context** used by the scanner, and prints whether
-each is inactive, active, or inaccessible. It fails closed on active or
-unreachable services; it never disables concurrent backups. After the
-trial it relays only sanitized worker status and deferral lines from
-the system journal. It then starts one
-ephemeral 90-second scanner invocation with a 10,000,000-byte
-combined ingress+egress **advisory budget** and polls systemd counters
-four times per second. It stops the complete service cgroup at
-8,000,000 counted bytes and prints the measured traffic. The
-transient service also has a 100-second runtime limit to stop an
-abandoned trial; no permanent service/timer is installed or enabled.
-Existing checkpointed folder progress is preserved.
+Perform exactly one 90-second metered pass (explicit admin opt-in):
 
-**This is not a strict network byte quota:** packets can arrive between
-polls; bursts can exceed the 8 MB stop point or even the 10 MB
-target. Accounting covers the service's IPv4/IPv6 sockets and
-subprocesses, not necessarily separately handled DNS traffic or other
-system services. For guaranteed hard limits, a separately engineered
-kernel/network-layer byte quota is required. The metadata response
-length caps in `drive_inventory.py` are not network traffic quotas.
-Never use this as justification to restart unmetered hourly scans.
+    sudo /usr/bin/python3 scripts/metered_drive_inventory_trial.py --execute
 
-The helper requires passwordless or already-authorized noninteractive
-`sudo` for the current shell; if `sudo -n` denies access, it
-fails without running the scan. The user can authorize a single sudo
-session in their own terminal with `sudo -v`, then rerun. The trial
-does not perform automatic privilege escalation or ask for passwords.
+Or, to avoid repeated sudo interaction, run **up to eight** 90-second passes,
+each separately accounted and committed before the next:
+
+    sudo /usr/bin/python3 scripts/metered_drive_inventory_trial.py --execute --passes 8
+
+The pass count is explicit and bounded to 1–24. The controller stops early
+when a pass has no network traffic (e.g. another backup is busy or the
+inventory is complete), or when the cumulative budget is exhausted.
+
+The ledger at `/var/lib/apple-sync-drive-metered/budget-v1.json` is
+root-owned and mode 0600; its directory is mode 0700. An exclusive lock
+prevents multiple controllers. Immediately *before* starting each metered
+worker, the controller durably marks that pass as **pending**, and commits
+the measured inbound/outbound byte counts after the worker is confirmed
+stopped. If the controller crashes, a counter disappears, stopping systemd
+fails, or any other interrupted pass cannot be reconciled, the pending
+marker remains and **all future passes refuse to run**. Do not delete or
+reset the ledger to bypass this block; inspect the journal and reconcile
+the last run first.
+
+The configured lifetime budget of this ledger is **100,000,000 bytes
+(100 MB)** of measured **ingress + egress**. Per-pass nominal target is
+10,000,000 bytes with a sampled cutoff at 8,000,000 bytes (or the
+remaining budget minus a 2,000,000-byte reserve, whichever is smaller).
+A 90-second controller limit and independent 100-second systemd service
+runtime limit protect each pass, and account polling happens every
+250 ms. The no-Apple preflight checks whether system IP accounting works.
+The system-managed worker passes the original user's runtime directory
+and D-Bus address, reports user-backup state, and refuses to run if that
+state cannot be verified. The same ordinary backup locks still apply.
+
+**Advisory budget, not a strict quota:** IP traffic is sampled and may
+overshoot between polls, including above 100 MB. System-level DNS or
+unattributed network activity may not be fully accounted. For a *hard*
+cap, a kernel/network-layer quota and verification would be required.
+No unattended scans are enabled by this feature. The user must explicitly
+run the controller from a terminal with sudo; Jobflick cannot prompt
+for an interactive sudo password. An interrupted pending marker must be
+investigated instead of automatically cleared.
 
 ## Local Drive coverage report (no Apple requests)
 
