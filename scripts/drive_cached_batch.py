@@ -185,7 +185,8 @@ def run(*, execute: bool = False, wait_idle: bool = False,
                     scope, relative, destination, archive.STATE, deadline,
                     whole_reader=whole_reader,
                     list_reader=lambda _scope, left, folder=folder:
-                        safe_recheck(_scope, left, folder))
+                        safe_recheck(_scope, left, folder),
+                    record_receipt=True)
             except (pilot.PilotError, pilot.verification.VerificationError,
                     pilot.verification.Deferred, inventory.InventoryError,
                     RuntimeError, OSError, ValueError):
