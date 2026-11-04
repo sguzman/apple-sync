@@ -241,6 +241,11 @@ def diagnose(*, extended: bool = False) -> int:
     for scope in SCOPES:
         if checked >= candidate_limit or deadline - time.monotonic() < 15:
             break
+        if extended and backup_busy():
+            print('Drive diagnostic DEFER: another backup became active; '
+                  'stopping before the next scope listing; '
+                  'Drive archive remains BLOCKED', flush=True)
+            return 0
         print('Drive: listing one limited scope; names and contents withheld',
               flush=True)
         try:
