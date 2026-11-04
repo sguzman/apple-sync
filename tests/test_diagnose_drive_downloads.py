@@ -168,6 +168,47 @@ class DriveDownloadDiagnosisTests(unittest.TestCase):
         self.assertIn('large.pdf', names)
         self.assertIn('document.pages', names)
 
+    def test_busy_checker_includes_all_photo_workers(self):
+        import subprocess
+        names = []
+        def status(cmd, **_kwargs):
+            names.append(cmd[4])
+            return subprocess.CompletedProcess(cmd, 0, 'inactive\\n', '')
+        with patch.object(mod.subprocess, 'run', side_effect=status):
+            self.assertFalse(mod.backup_busy())
+        self.assertEqual(tuple(names), mod.BUSY_UNITS)
+        self.assertIn('apple-sync-photos-progress.service', names)
+        self.assertIn('apple-sync-photos-inventory.service', names)
+
+    def test_wait_idle_resumes_when_all_services_become_idle(self):
+        output = io.StringIO()
+        with (patch.object(mod, 'backup_busy', side_effect=[True, True, False]),
+              patch.object(mod.time, 'sleep') as sleeper,
+              contextlib.redirect_stdout(output)):
+            self.assertTrue(mod.wait_for_idle(seconds=45))
+        self.assertEqual(sleeper.call_count, 2)
+        self.assertIn('waiting for a safe idle', output.getvalue())
+
+    def test_wait_idle_expires_without_any_drive_reads(self):
+        output = io.StringIO()
+        with (patch.object(mod, 'backup_busy', return_value=True),
+              patch.object(mod.time, 'monotonic', side_effect=[0, 3]),
+              patch.object(mod.time, 'sleep') as sleeper,
+              contextlib.redirect_stdout(output)):
+            self.assertFalse(mod.wait_for_idle(seconds=2))
+        sleeper.assert_not_called()
+        self.assertIn('no idle window', output.getvalue())
+
+    def test_main_wait_idle_deferral_does_not_run_diagnosis(self):
+        with (patch.object(mod, 'wait_for_idle', return_value=False),
+              patch.object(mod, 'diagnose') as diagnostic,
+              patch.object(mod, 'argparse') as parser):
+            # Exercise the CLI with the real parser while mocking only work.
+            parser.ArgumentParser.return_value.parse_args.return_value.extended = True
+            parser.ArgumentParser.return_value.parse_args.return_value.wait_idle = True
+            self.assertEqual(mod.main(), 0)
+        diagnostic.assert_not_called()
+
     def test_extended_defers_before_any_remote_reads_if_backup_busy(self):
         output = io.StringIO()
         with (patch.object(mod, 'backup_busy', return_value=True),
