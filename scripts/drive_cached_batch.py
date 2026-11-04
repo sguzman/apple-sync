@@ -3,7 +3,7 @@
 
 Never rescans the Drive root per batch. Safely downloads two independent
 whole-file copies and requires exact agreement plus live parent-folder metadata.
-Large/unknown/native/ambiguous files remain excluded. Existing unrestricted
+Files above 64 MiB, unknown/native/ambiguous files remain excluded. Existing unrestricted
 archive_batch.py drive --execute remains blocked.
 """
 from __future__ import annotations
@@ -195,7 +195,7 @@ def run(*, execute: bool = False, wait_idle: bool = False,
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--execute', action='store_true',
-                        help='explicitly archive up to two independently verified files')
+                        help='archive up to two small verified files, or one 8–64 MiB file with --large')
     parser.add_argument('--wait-idle', action='store_true',
                         help='wait for other backups to be idle')
     parser.add_argument('--large', action='store_true',
