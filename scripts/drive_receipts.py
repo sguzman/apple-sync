@@ -16,7 +16,9 @@ import re
 import stat
 import tempfile
 import time
+import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import archive_batch as archive
 
 RECEIPT_DIR = 'drive-verification-receipts'
@@ -85,7 +87,7 @@ def create_receipt(state_root: Path, source_entry: dict,
 
     Caller must have performed the two whole remote reads and *new*
     atomic publication, with SHA/size validation of the actual final file.
-    Returns True for new receipt, False if an identical record already exists.
+    Returns True only for a newly published receipt; old records are immutable.
     """
     path = source_entry.get('Path')
     size = source_entry.get('Size')
@@ -126,10 +128,12 @@ def check_receipt(state_root: Path, source_entry: dict,
         return 'invalid'
     try:
         receipt = _parent(state_root, path, create=False)
-        if receipt is None or not receipt.exists():
+        if receipt is None:
             return 'missing'
         if receipt.is_symlink():
             return 'invalid'
+        if not receipt.exists():
+            return 'missing'
         mode = receipt.stat().st_mode
         if not stat.S_ISREG(mode) or mode & 0o077:
             return 'invalid'
