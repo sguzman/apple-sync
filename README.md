@@ -511,6 +511,44 @@ The receipts attest two matching *Apple-visible* remote reads; they are
 nor are they evidence of full backup coverage. The old unrestricted Drive
 downloader stays blocked, and no timer has been enabled for archive writes.
 
+## Existing Drive archive re-verification (explicit opt-in)
+
+The first successful 77,256-byte Drive pilot predates durable SHA-256
+verification receipts. Its bytes must remain intact; a matching file size
+is insufficient to create a receipt retroactively.
+
+The new `scripts/reverify_drive_existing.py` previews which **already
+present, size-matching ordinary files up to 8 MiB** are missing a receipt:
+
+    python3 scripts/reverify_drive_existing.py
+
+Preview is local and read-only. The script requires a **complete and
+recent** saved Drive inventory even in preview mode. If the initial
+folder walk is still underway, it says `BLOCKED` and makes no Apple
+requests. It never uses the incomplete checkpoint to start downloading.
+
+When the inventory is complete and this implementation has passed QA,
+a separate opt-in one-file verification may be run using:
+
+    python3 scripts/reverify_drive_existing.py --execute --wait-idle
+
+**This live command has not yet been approved.** It selects at most
+one existing file, checks its inode/type/size and local SHA-256,
+downloads the remote file **twice in full** with the existing 8-MiB per
+read cap, confirms both remote copies match the original local hash,
+checks the current parent-folder metadata/identity without recursively
+listing Drive, then rechecks the same local inode and SHA-256 before
+creating a new private immutable receipt. It never opens, overwrites,
+replaces, or removes the existing archive file. Existing or invalid
+receipts must be reviewed, not replaced. If either remote read or
+metadata verification fails, it emits a sanitized deferral without
+creating a receipt.
+
+The same shared archive lock and active-Photos/Google deferral rules
+apply. This is a **manual recovery of evidence for legacy archived
+files**, not a file downloader, scheduler, remote checksum oracle, or
+substitute for a complete Drive inventory.
+
 ## Cached-inventory Drive batch (experimental; opt-in only)
 
 `scripts/drive_cached_batch.py` prepares the next phase without enabling the
