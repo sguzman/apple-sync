@@ -77,12 +77,16 @@ class MeteredDriveTrialTests(unittest.TestCase):
 
     def test_failed_accounting_preflight_cannot_start_trial(self):
         with (patch.object(metered, 'guard_setup'),
+              patch.object(metered, 'BudgetLedger') as ledger,
               patch.object(metered, 'preflight',
                            side_effect=metered.TrialError('IP_COUNTER_UNAVAILABLE')),
               patch.object(metered, 'trial') as trial,
+              patch.object(metered.os, 'geteuid', return_value=0),
               patch.object(metered.os, 'getpid', return_value=77),
               patch('sys.argv', ['metered', '--execute']),
+              contextlib.redirect_stdout(io.StringIO()),
               contextlib.redirect_stderr(io.StringIO())):
+            ledger.return_value.__enter__.return_value.summary.return_value = 'safe'
             self.assertEqual(metered.main(), 2)
         trial.assert_not_called()
 
@@ -196,6 +200,94 @@ class MeteredDriveTrialTests(unittest.TestCase):
             self.assertEqual(metered.main(), 0)
         guard.assert_not_called()
         self.assertIn('PREVIEW:', out.getvalue())
+
+    def test_cumulative_multi_pass_invocation_commits_each_pass(self):
+        output = io.StringIO()
+        with (patch.object(metered, 'guard_setup'),
+              patch.object(metered, 'BudgetLedger') as budget_ledger,
+              patch.object(metered, 'preflight'),
+              patch.object(metered, 'trial',
+                           side_effect=[(2000, 1000), (1000, 2000),
+                                        (3000, 4000)]) as trial,
+              patch.object(metered.os, 'geteuid', return_value=0),
+              patch.object(metered.os, 'getpid', return_value=99),
+              patch('sys.argv', ['metered', '--execute', '--passes', '3']),
+              contextlib.redirect_stdout(output)):
+            ledger = budget_ledger.return_value.__enter__.return_value
+            ledger.remaining = metered.CAP_BYTES
+            ledger.summary.return_value = 'cumulative status'
+            self.assertEqual(metered.main(), 0)
+            self.assertEqual(trial.call_count, 3)
+            self.assertEqual(ledger.begin.call_count, 3)
+            self.assertEqual(ledger.complete.call_count, 3)
+            ledger.complete.assert_any_call(3000, 4000)
+            self.assertIn('METERED PASS 3/3', output.getvalue())
+
+    def test_zero_traffic_ends_multipass_sequence(self):
+        out = io.StringIO()
+        with (patch.object(metered, 'guard_setup'),
+              patch.object(metered, 'BudgetLedger') as budget_ledger,
+              patch.object(metered, 'preflight'),
+              patch.object(metered, 'trial',
+                           return_value=(0, 0)) as trial,
+              patch.object(metered.os, 'geteuid', return_value=0),
+              patch('sys.argv', ['metered', '--execute', '--passes', '5']),
+              contextlib.redirect_stdout(out)):
+            ledger = budget_ledger.return_value.__enter__.return_value
+            ledger.remaining = metered.CAP_BYTES
+            ledger.summary.return_value = 'status'
+            self.assertEqual(metered.main(), 0)
+        trial.assert_called_once()
+        self.assertIn('no network traffic', out.getvalue())
+
+    def test_pending_run_blocks_before_preflight(self):
+        with (patch.object(metered, 'guard_setup'),
+              patch.object(metered, 'BudgetLedger') as budget_ledger,
+              patch.object(metered, 'preflight') as preflight,
+              patch.object(metered.os, 'geteuid', return_value=0),
+              patch('sys.argv', ['metered', '--execute']),
+              contextlib.redirect_stdout(io.StringIO()),
+              contextlib.redirect_stderr(io.StringIO())):
+            ledger = budget_ledger.return_value.__enter__.return_value
+            ledger.summary.return_value = 'pending'
+            ledger.check_ready.side_effect = metered.BudgetError(
+                'PREVIOUS_RUN_UNRECONCILED_NO_NEW_SCANS')
+            self.assertEqual(metered.main(), 2)
+        preflight.assert_not_called()
+
+    def test_status_reads_only_ledger_no_scanner_or_preflight(self):
+        out = io.StringIO()
+        with (patch.object(metered, 'BudgetLedger') as budget_ledger,
+              patch.object(metered, 'guard_setup') as guard,
+              patch.object(metered, 'preflight') as preflight,
+              patch.object(metered, 'trial') as trial,
+              patch.object(metered.os, 'geteuid', return_value=0),
+              patch('sys.argv', ['metered', '--status']),
+              contextlib.redirect_stdout(out)):
+            ledger = budget_ledger.return_value.__enter__.return_value
+            ledger.summary.return_value = 'CUMULATIVE MEASURED: status'
+            ledger.data = {'pending': None}
+            self.assertEqual(metered.main(), 0)
+        guard.assert_not_called()
+        preflight.assert_not_called()
+        trial.assert_not_called()
+        self.assertIn('CUMULATIVE MEASURED', out.getvalue())
+
+    def test_adaptive_cutoff_never_spends_the_remaining_reserve(self):
+        out = io.StringIO()
+        with (patch.object(metered, 'guard_setup'),
+              patch.object(metered, 'BudgetLedger') as budget_ledger,
+              patch.object(metered, 'preflight'),
+              patch.object(metered, 'trial',
+                           return_value=(100, 200)) as trial,
+              patch.object(metered.os, 'geteuid', return_value=0),
+              patch('sys.argv', ['metered', '--execute']),
+              contextlib.redirect_stdout(out)):
+            ledger = budget_ledger.return_value.__enter__.return_value
+            ledger.remaining = metered.RESERVE_BYTES + 12345
+            ledger.summary.return_value = 'status'
+            self.assertEqual(metered.main(), 0)
+        self.assertEqual(trial.call_args.kwargs['stop_at'], 12345)
 
     def test_user_timer_active_is_a_hard_blocker(self):
         class FakeUser:
