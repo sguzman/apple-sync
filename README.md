@@ -337,6 +337,43 @@ whole-file downloader that strictly validates file identities and stages writes
 atomically. If full lengths differ from listing metadata, classify Apple
 packages separately rather than globally suppress size verification.
 
+## Persistent iCloud Drive metadata inventory (opt-in)
+
+After a verified one-file permanent-archive pilot on 2026-11-04,
+`scripts/drive_inventory.py` implements the next required component:
+a **private, persistent full iCloud Drive metadata snapshot**, stored at
+`/drive/icloud/.apple-sync-state/drive-file-inventory.json`. It distinguishes
+regular files with known sizes, unknown-size (including Apple-native) files,
+directories, and repeated/ambiguous paths; it retains all records for later
+assessment, including ineligible ones.
+
+To explicitly create/refresh it (metadata only, **no file downloads**):
+
+    python3 scripts/drive_inventory.py --execute --wait-idle
+
+To report the previously saved counts and size without contacting Apple:
+
+    python3 scripts/drive_inventory.py
+
+An explicit refresh makes **one bounded recursive** `rclone lsjson icloud:`
+request, streams up to 128 MiB of JSON metadata into a private temporary file,
+and gives the listing up to 25 minutes. Its invocation can first wait for up
+to twelve minutes for Google Drive and existing Photos services to be idle.
+The shared Apple archive lock prevents overlapping archive writes. If a
+listing times out, fails, is malformed/unsafe, or omits previously known
+asset identities, the prior complete snapshot is retained, and an operator
+can investigate cloud deletions/renames rather than silently discarding them.
+
+**Critically, a normal backup worker must never enumerate the entire Drive
+before each download pass.** This snapshot is designed to be reused locally
+by future batches. Unlike Photos, there is no independently established
+cheap, persistent iCloud Drive change-token listing cache in our current
+backend. Accordingly, **no periodic inventory refresh timer is enabled
+or introduced yet**: frequent full rescans would reproduce the original
+inefficiency. Refresh cadence/delta handling remain engineering tasks.
+A successful listing still does not prove Apple exposed every cloud asset,
+nor does a snapshot authorize unattended Drive downloads.
+
 ## Controlled permanent iCloud Drive pilot (2026-11-04)
 
 The 2026-11-04 quarantined Drive staging test passed **72/72 total unit
