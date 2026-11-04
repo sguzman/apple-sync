@@ -402,7 +402,24 @@ def format_summary(prefix: str, stats: dict) -> str:
             f'{stats["collision_records"]} records')
 
 
-def run(*, execute: bool = False, wait_idle: bool = False) -> int:
+def resume_needed(state_root: Path) -> bool:
+    """Only the first full snapshot (or explicit in-progress refresh) needs work."""
+    if load_progress(state_root) is not None:
+        return True
+    try:
+        load(state_root, max_age=None)
+    except InventoryError as exc:
+        if str(exc) == 'INVENTORY_NOT_CREATED':
+            return True
+        raise
+    return False
+
+
+def run(*, execute: bool = False, wait_idle: bool = False,
+        resume_only: bool = False) -> int:
+    if resume_only and not execute:
+        raise InventoryError('RESUME_ONLY_REQUIRES_EXECUTE')
+
     if not execute:
         try:
             _, stats = load(archive.STATE)
@@ -419,6 +436,10 @@ def run(*, execute: bool = False, wait_idle: bool = False) -> int:
                   f'{len(progress["pending"])} pending; '
                   f'{len(progress["entries"])} records saved; '
                   'no network call', flush=True)
+        return 0
+    if resume_only and not resume_needed(archive.STATE):
+        print('Drive inventory COMPLETE: existing snapshot retained; '
+              'resume-only mode makes no remote calls', flush=True)
         return 0
     archive.safe_directory(archive.SOURCES['drive'][1])
     if archive.STATE.is_symlink():
@@ -448,6 +469,10 @@ def run(*, execute: bool = False, wait_idle: bool = False) -> int:
             print('Drive inventory DEFER: another backup active before listing',
                   flush=True)
             return 0
+        if resume_only and not resume_needed(archive.STATE):
+            print('Drive inventory COMPLETE: existing snapshot retained; '
+                  'resume-only mode makes no remote calls', flush=True)
+            return 0
         print('Drive inventory: resumable folder-by-folder metadata listing; '
               'no file downloads', flush=True)
         complete, details = refresh(archive.STATE)
@@ -470,11 +495,17 @@ def main() -> int:
                         help='explicit opt-in full metadata enumeration')
     parser.add_argument('--wait-idle', action='store_true',
                         help='wait up to twelve minutes for other backups to finish')
+    parser.add_argument('--resume-only', action='store_true',
+                        help='resume first inventory until complete, then skip '
+                        'all further remote calls; intended for optional timer')
     args = parser.parse_args()
     if args.wait_idle and not args.execute:
         parser.error('--wait-idle requires --execute')
+    if args.resume_only and not args.execute:
+        parser.error('--resume-only requires --execute')
     try:
-        return run(execute=args.execute, wait_idle=args.wait_idle)
+        return run(execute=args.execute, wait_idle=args.wait_idle,
+                   resume_only=args.resume_only)
     except (InventoryError, RuntimeError, OSError, subprocess.SubprocessError) as exc:
         print('Drive inventory: ' +
               (str(exc) if isinstance(exc, InventoryError)
