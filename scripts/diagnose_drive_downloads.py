@@ -32,7 +32,12 @@ EXTENDED_MAX_CANDIDATES = 8
 EXTENDED_MAX_PER_SCOPE = 4
 EXTENDED_TOTAL_SECONDS = 420
 EXTENDED_SAMPLE_BYTES = 16 * 1024
-BUSY_UNITS = ('google-drive-rclone.service', 'apple-sync-photos.service')
+BUSY_UNITS = ('google-drive-rclone.service',
+              'apple-sync-photos.service',
+              'apple-sync-photos-progress.service',
+              'apple-sync-photos-inventory.service')
+WAIT_IDLE_SECONDS = 12 * 60
+WAIT_INTERVAL_SECONDS = 15
 
 
 class ReadFailure(Exception):
@@ -93,6 +98,24 @@ def backup_busy() -> bool:
         if result.returncode or result.stdout.strip() not in ('inactive', 'failed'):
             return True
     return False
+
+
+def wait_for_idle(seconds: float = WAIT_IDLE_SECONDS) -> bool:
+    """Wait only for a bounded idle window; do not pause other backups."""
+    deadline = time.monotonic() + seconds
+    if not backup_busy():
+        return True
+    print('Drive diagnostic: other backups busy; waiting for a safe idle '
+          'window without modifying services', flush=True)
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            print('Drive diagnostic DEFER: no idle window within wait budget; '
+                  'no Drive source reads attempted', flush=True)
+            return False
+        time.sleep(min(WAIT_INTERVAL_SECONDS, remaining))
+        if not backup_busy():
+            return True
 
 
 def is_iwork(path: str) -> bool:
@@ -275,7 +298,14 @@ def main() -> int:
     parser.add_argument('--extended', action='store_true',
                         help='more varied small files and 16-KiB/mid-file ranges; '
                         'defer while other backups are active')
+    parser.add_argument('--wait-idle', action='store_true',
+                        help='wait up to 12 minutes for an idle window before '
+                        'extended diagnosis, without stopping other backups')
     args = parser.parse_args()
+    if args.wait_idle and not args.extended:
+        parser.error('--wait-idle requires --extended')
+    if args.wait_idle and not wait_for_idle():
+        return 0
     return diagnose(extended=args.extended)
 
 
