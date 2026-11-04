@@ -460,34 +460,56 @@ This report makes no changes to the inventory, Photos, archive files,
 automations or timers. Its size buckets are for planning, not approval
 to download any unsupported file type.
 
-## Read-only archive audit (inventory size comparison only)
+## Read-only archive audit and durable verification receipts
 
 The backup worker skips existing destination paths to prevent overwrites,
-but **existence alone is not evidence of a verified backup**. The
-`scripts/audit_drive_archive.py` utility compares archive file existence
-and sizes against either the saved partial inventory checkpoint or the
-completed inventory:
+but **existence alone is not evidence of a verified backup**.
+`scripts/audit_drive_archive.py` compares archived files against the
+currently available partial or completed Drive inventory:
 
     python3 scripts/audit_drive_archive.py
 
-It checks that `/drive` is mounted as writable ext4 before inspecting files,
-refuses symlink targets and symlink parent directories, and summarizes
-missing files, wrong-sized files, ambiguous paths, existing regular files,
-and count/bytes of files matching the advertised cloud size. It prints
-aggregate counts only—no filenames or hashes. It does not open files for
-writing, contact Apple, download media, or change archive service state.
+It checks that `/drive` is mounted, rejects archive symlinks, and counts
+missing files, wrong-size files, ambiguous paths, and matching-size files.
+It does not modify archive files, make Apple requests, or touch systemd.
+Only aggregate counts are printed—never private filenames or hashes.
 
-**A size match is never labeled cryptographically verified**. This utility
-does not yet maintain a durable receipt tying each locally published file
-to its two remote whole-file SHA-256 checks. A file can be the correct
-size and still contain wrong data. Earlier pilot-verified files without
-such receipts must not be automatically counted as cryptographically
-certified by this audit. Existing files absent from the *partial* cloud
-inventory are also outside its denominator.
+New `pilot_drive_archive.py` and `drive_cached_batch.py` **live
+publications** also write a private, write-once receipt under
+`/drive/icloud/.apple-sync-state/drive-verification-receipts/`. The
+receipt binds the remote source identity (path, size, mtime, ID and any
+advertised hashes) and exact SHA-256 to the *newly published* local file,
+and is written **only after** two whole-file downloads match, a fresh
+parent-folder listing confirms source identity, the stage passes its
+checkpoint/hash check, and atomic no-overwrite publication plus local
+SHA verification both succeed.
 
-The next integrity milestone is durable per-file verification receipts
-and safe revalidation for pre-existing files. Full backup completeness
-remains blocked until inventory and receipt coverage are established.
+Receipts use mode 0600 under mode-0700 directories. Existing receipts are
+never silently overwritten. A competing file that already exists at the
+destination does not get a new receipt. If publication succeeds but
+writing the receipt fails, the file remains intact **without certification**;
+the archive skips future overwrites and the audit continues to classify it
+as unverified. Receipt-write errors are handled without exposing filenames.
+
+For a file with a valid receipt, the audit **re-hashes current local
+contents** and compares source metadata, size, and SHA-256 before counting
+it as `Files with valid dual-whole-read receipt and matching local SHA-256`.
+Corrupt/unsafe receipts, stale source identity, or same-size local tampering
+are listed separately and **never counted as verified**. Files with matching
+size but no valid receipt remain explicitly unverified.
+
+The first real iCloud Drive file archived on 2026-11-04 (77,256 bytes)
+predates receipts and is **not retroactively certified**. Its pilot
+succeeded at that time, but its present contents will require an explicit
+re-verification against independently read remote bytes before a receipt
+can be issued. The initial read-only audit on 2026-11-04 found one
+size-matching file and 1,630 missing among 1,631 discovered files; these
+figures describe only the **incomplete 340-folder checkpoint**.
+
+The receipts attest two matching *Apple-visible* remote reads; they are
+**not signed by Apple and not a substitute for a trusted source checksum**,
+nor are they evidence of full backup coverage. The old unrestricted Drive
+downloader stays blocked, and no timer has been enabled for archive writes.
 
 ## Cached-inventory Drive batch (experimental; opt-in only)
 
