@@ -20,6 +20,10 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from drive_meter_budget import (BudgetError, BudgetLedger, CAP_BYTES,
+                                RESERVE_BYTES)
+
 USER = 'sguzman'
 REPO = Path('/home/sguzman/Code/Sync/apple-sync')
 WORKER = REPO / 'scripts' / 'drive_inventory.py'
@@ -210,7 +214,7 @@ def report_trial_service_log(unit: str) -> None:
             print(line, flush=True)
 
 
-def trial(unit: str) -> None:
+def trial(unit: str, *, stop_at: int = STOP_BYTES) -> tuple[int, int]:
     # Launch a same-context user-manager check, then exec the original
     # resumable inventory. This prevents silent zero-byte deferrals.
     args = ['/usr/bin/python3', str(REPO / 'scripts'
@@ -227,7 +231,7 @@ def trial(unit: str) -> None:
             largest_ingress = max(largest_ingress, ingress)
             largest_egress = max(largest_egress, egress)
             total = ingress + egress
-            if total >= STOP_BYTES:
+            if total >= stop_at:
                 reason = 'SOFT_BUDGET_REACHED'
                 break
             if data.get('SubState') in ('exited', 'dead', 'failed'):
@@ -257,11 +261,13 @@ def trial(unit: str) -> None:
         print(f'MEASURED IP EGRESS: {largest_egress} bytes', flush=True)
         print(f'MEASURED IP TOTAL: '
               f'{largest_ingress + largest_egress} bytes', flush=True)
-        print('Budget: 10,000,000 bytes; polling stop at 8,000,000 bytes. '
+        print(f'Per-pass advisory target: {MAX_BYTES} bytes; '
+              f'sampled cutoff: {stop_at} bytes. '
               'Counter is sampled, not a strict quota; brief overshoot '
               'is possible.', flush=True)
         print('Automatic iCloud Drive inventory timer was NOT enabled.',
               flush=True)
+    return largest_ingress, largest_egress
 
 
 def main() -> int:
@@ -270,28 +276,70 @@ def main() -> int:
                         help='perform one short system-accounted inventory trial')
     parser.add_argument('--worker-entry', action='store_true',
                         help=argparse.SUPPRESS)
+    parser.add_argument('--passes', type=int, default=1,
+                        help='number of 90-second metered passes (1-24)')
+    parser.add_argument('--status', action='store_true',
+                        help='show cumulative budget without contacting Apple')
     args = parser.parse_args()
     if args.worker_entry:
         return worker_entry()
-    if not args.execute:
-        print('PREVIEW: one transient user-owned system service, '
-              'IPAccounting=yes, 90s runtime, 8MB sampled cutoff; '
-              '10MB advisory budget. No timer enabled. '
-              'Pass --execute to actually start.', flush=True)
+    if not (1 <= args.passes <= 24):
+        parser.error('--passes must be between 1 and 24')
+    if args.status and args.execute:
+        parser.error('--status and --execute are mutually exclusive')
+    if not args.execute and not args.status:
+        print('PREVIEW: 90s metered passes; per-pass 10MB advisory budget, '
+              '8MB sampled cutoff, cumulative 100MB measured cap '
+              'with 2MB reserve. No timer enabled. '
+              'Run with sudo --status to inspect the ledger, or '
+              'sudo --execute --passes N for N explicitly metered passes.',
+              flush=True)
         return 0
+
     nonce = str(os.getpid())
     try:
-        guard_setup()
-        preflight('apple-sync-ipaccounting-check-' + nonce + '.service')
-        print('Starting one metered iCloud Drive inventory trial; '
-              'remaining scan checkpoint preserved', flush=True)
-        trial('apple-sync-drive-metered-' + nonce + '.service')
-    except (TrialError, OSError, subprocess.TimeoutExpired) as exc:
-        if isinstance(exc, TrialError):
-            print('METERED TRIAL BLOCKED: ' + str(exc), file=sys.stderr,
-                  flush=True)
+        if os.geteuid() != 0:
+            raise TrialError('ROOT_REQUIRED')
+        if not args.status:
+            guard_setup()
+        with BudgetLedger() as ledger:
+            print(ledger.summary(), flush=True)
+            if args.status:
+                if ledger.data['pending'] is not None:
+                    print('BLOCKED: previous metered run was interrupted; '
+                          'do not reset or assume zero traffic', flush=True)
+                return 0
+
+            ledger.check_ready()
+            preflight('apple-sync-ipaccounting-check-' + nonce + '.service')
+            for index in range(args.passes):
+                if ledger.remaining <= RESERVE_BYTES:
+                    print('STOP: cumulative measured budget exhausted',
+                          flush=True)
+                    break
+                ledger.check_ready()
+                cutoff = min(STOP_BYTES, ledger.remaining - RESERVE_BYTES)
+                unit = f'apple-sync-drive-metered-{nonce}-{index}.service'
+                print(f'METERED PASS {index + 1}/{args.passes}: '
+                      f'sampled cutoff={cutoff} bytes, '
+                      f'remaining cumulative budget={ledger.remaining} bytes',
+                      flush=True)
+                # Crash-safe reservation: a dead controller cannot silently
+                # treat an unmeasured run as zero traffic on the next launch.
+                ledger.begin(unit)
+                ingress, egress = trial(unit, stop_at=cutoff)
+                ledger.complete(ingress, egress)
+                print(ledger.summary(), flush=True)
+                if ingress + egress == 0:
+                    print('STOP: no network traffic; worker probably '
+                          'deferred or inventory is complete', flush=True)
+                    break
+    except (TrialError, BudgetError, OSError, subprocess.TimeoutExpired) as exc:
+        if isinstance(exc, (TrialError, BudgetError)):
+            print('METERED INVENTORY BLOCKED: ' + str(exc),
+                  file=sys.stderr, flush=True)
         else:
-            print('METERED TRIAL FAILED: controller or systemd error; '
+            print('METERED INVENTORY FAILED: controller or systemd error; '
                   'no further runs scheduled', file=sys.stderr, flush=True)
         return 2
     return 0
