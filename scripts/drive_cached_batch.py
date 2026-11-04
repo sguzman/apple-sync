@@ -3,8 +3,9 @@
 
 Never rescans the Drive root per batch. Safely downloads two independent
 whole-file copies and requires exact agreement plus live parent-folder metadata.
-Files above 64 MiB, unknown/native/ambiguous files remain excluded. Existing unrestricted
-archive_batch.py drive --execute remains blocked.
+Files above 64 MiB, unknown/native/ambiguous files remain excluded. The
+separate empty-file profile requires a successful zero-byte rclone read.
+Existing unrestricted archive_batch.py drive --execute remains blocked.
 """
 from __future__ import annotations
 
@@ -87,7 +88,10 @@ def safe_recheck(_scope: str, deadline: float, folder: str) -> list[dict]:
 
 
 def run(*, execute: bool = False, wait_idle: bool = False,
-        large: bool = False) -> int:
+        large: bool = False, empty: bool = False) -> int:
+    if large and empty:
+        print('Drive cached batch BLOCKED: conflicting profiles', flush=True)
+        return 2
     # Critically: no calls to rclone, no Apple listing, no archival writes
     # until a fully validated inventory snapshot has been loaded.
     try:
@@ -104,14 +108,21 @@ def run(*, execute: bool = False, wait_idle: bool = False,
     destination = archive.SOURCES['drive'][1]
     if execute:
         archive.safe_directory(destination)
-    min_bytes = MAX_FILE_SIZE + 1 if large else MIN_FILE_SIZE
-    max_bytes = MAX_LARGE_FILE_SIZE if large else MAX_FILE_SIZE
-    max_files = 1 if large else MAX_FILES
-    max_attempts = 2 if large else MAX_ATTEMPTS
-    max_source_bytes = MAX_LARGE_SOURCE_BYTES if large else MAX_SOURCE_BYTES
+    if empty:
+        min_bytes = max_bytes = 0
+        max_files = 1
+        max_attempts = 2
+        max_source_bytes = 0
+        profile = 'empty'
+    else:
+        min_bytes = MAX_FILE_SIZE + 1 if large else MIN_FILE_SIZE
+        max_bytes = MAX_LARGE_FILE_SIZE if large else MAX_FILE_SIZE
+        max_files = 1 if large else MAX_FILES
+        max_attempts = 2 if large else MAX_ATTEMPTS
+        max_source_bytes = MAX_LARGE_SOURCE_BYTES if large else MAX_SOURCE_BYTES
+        profile = 'large' if large else 'small'
     files, stats = candidates(entries, destination,
                               min_file_size=min_bytes, max_file_size=max_bytes)
-    profile = 'large' if large else 'small'
     print(f'Drive cached batch ({profile}): {inv_stats["count"]} cached records; '
           f'{len(files)} eligible missing ordinary files; '
           f'{stats["ambiguous"]} ambiguous records excluded; '
@@ -201,11 +212,15 @@ def main() -> int:
     parser.add_argument('--large', action='store_true',
                         help='separately opt in to one 8–64 MiB file, '
                         'two whole-file verification reads, 128-MiB limit')
+    parser.add_argument('--empty', action='store_true',
+                        help='separately opt in to one verified zero-byte file')
     args = parser.parse_args()
+    if args.empty and args.large:
+        parser.error('--empty and --large are mutually exclusive')
     if args.wait_idle and not args.execute:
         parser.error('--wait-idle requires --execute')
     return run(execute=args.execute, wait_idle=args.wait_idle,
-               large=args.large)
+               large=args.large, empty=args.empty)
 
 
 if __name__ == '__main__':
