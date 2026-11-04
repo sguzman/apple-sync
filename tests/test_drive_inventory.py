@@ -167,7 +167,8 @@ class DriveInventoryTests(unittest.TestCase):
                 return original([sys.executable, '-c',
                                  'import sys;sys.stdout.write("[]")'],
                                 **kwargs)
-            with patch.object(mod.subprocess, 'Popen', side_effect=pretend_rclone):
+            with (patch.object(mod.subprocess, 'Popen', side_effect=pretend_rclone),
+                  patch.object(mod.diagnosis, 'backup_busy', return_value=False)):
                 result = mod.fetch_listing_to_file(root, timeout=10)
             self.assertEqual(result, [])
             self.assertEqual(calls[0][:4],
@@ -184,6 +185,7 @@ class DriveInventoryTests(unittest.TestCase):
                      'import sys;sys.stdout.write("a"*1024)'], **kwargs)
             with (patch.object(mod.subprocess, 'Popen',
                                side_effect=fake_process),
+                  patch.object(mod.diagnosis, 'backup_busy', return_value=False),
                   patch.object(mod, 'MAX_OUTPUT_BYTES', 100)):
                 with self.assertRaisesRegex(mod.InventoryError,
                                             'LISTING_TOO_LARGE'):
