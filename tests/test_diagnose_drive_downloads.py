@@ -207,6 +207,15 @@ class DriveDownloadDiagnosisTests(unittest.TestCase):
             self.assertEqual(mod.main(), 0)
         diagnostic.assert_not_called()
 
+    def test_extended_rechecks_before_scope_listing(self):
+        output = io.StringIO()
+        with (patch.object(mod, 'backup_busy', side_effect=[False, True]),
+              patch.object(mod, 'run_rclone') as reader,
+              contextlib.redirect_stdout(output)):
+            self.assertEqual(mod.diagnose(extended=True), 0)
+        reader.assert_not_called()
+        self.assertIn('before the next scope listing', output.getvalue())
+
     def test_extended_defers_before_any_remote_reads_if_backup_busy(self):
         output = io.StringIO()
         with (patch.object(mod, 'backup_busy', return_value=True),
