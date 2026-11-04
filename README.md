@@ -273,7 +273,16 @@ whether full copies agree, whether their sizes match the listing, and whether
 ranges agree with the full copy. After two consistent ordinary-file samples
 on 2026-11-03, the expanded follow-up is:
 
-    python3 scripts/diagnose_drive_downloads.py --extended
+    python3 scripts/diagnose_drive_downloads.py --extended --wait-idle
+
+With `--wait-idle`, the diagnostic first waits up to 12 minutes for an idle
+window instead of immediately giving up if Google Drive or a Photos worker is
+active. It never stops or reconfigures those services. It checks the full
+Photos, progress-album, inventory-refresh and Google Drive workers; it also
+rechecks between scopes/files, and may still print `DEFER` if the next
+backup starts while it is running. A deferred diagnosis is not evidence of
+Drive integrity; rerun during a quieter window if necessary. Allow up to
+19 minutes total for an idle wait and the bounded diagnostic.
 
 The expanded mode samples up to eight files from the same limited directory
 scopes (maximum four per scope), spreads selection across smaller/larger files,
