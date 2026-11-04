@@ -160,6 +160,137 @@ class DriveInventoryTests(unittest.TestCase):
             self.assertTrue((root / '.apple-sync.lock').exists())
             self.assertIn('saved privately', output.getvalue())
 
+    def test_folder_walk_checkpoint_resumes_without_relisting_completed_folders(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            visited = []
+            def first_pass(folder, timeout):
+                visited.append(folder)
+                if folder == '':
+                    return [
+                        {'Path': 'Desktop', 'IsDir': True, 'Size': -1},
+                        {'Path': 'Documents', 'IsDir': True, 'Size': -1},
+                        file('root.txt', 9, 'root')]
+                if folder == 'Desktop':
+                    return [file('first.pdf', 100, 'first')]
+                raise mod.InventoryDeferred()
+            with patch.object(mod.diagnosis, 'backup_busy', return_value=False):
+                done, progress = mod.walk_resumable(root, reader=first_pass)
+            self.assertFalse(done)
+            self.assertEqual(visited, ['', 'Desktop', 'Documents'])
+            self.assertEqual(progress['finished'], ['', 'Desktop'])
+            self.assertEqual(progress['pending'], ['Documents'])
+            self.assertEqual(len(progress['entries']), 4)
+            self.assertFalse(mod.inventory_path(root).exists())
+            checkpoint = mod.load_progress(root)
+            self.assertEqual(checkpoint['pending'], ['Documents'])
+            self.assertFalse(mod.progress_path(root).stat().st_mode & 0o077)
+
+            visited.clear()
+            def second_pass(folder, timeout):
+                visited.append(folder)
+                self.assertEqual(folder, 'Documents')
+                return [file('second.txt', 50, 'second')]
+            with patch.object(mod.diagnosis, 'backup_busy', return_value=False):
+                done, stats = mod.walk_resumable(root, reader=second_pass)
+            self.assertTrue(done)
+            self.assertEqual(visited, ['Documents'])
+            self.assertEqual(stats['count'], 5)
+            self.assertEqual(stats['known_bytes'], 159)
+            self.assertIsNone(mod.load_progress(root))
+            paths = [item['Path'] for item in mod.load(root)[0]]
+            self.assertIn('Desktop/first.pdf', paths)
+            self.assertIn('Documents/second.txt', paths)
+
+    def test_checkpoint_retained_if_folder_listing_fails(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            def reader(folder, timeout):
+                if folder == '':
+                    return [{'Path': 'Desktop', 'IsDir': True},
+                            file('root.txt', 123, 'root')]
+                raise mod.InventoryError('FOLDER_LIST_FAILED')
+            with patch.object(mod.diagnosis, 'backup_busy', return_value=False):
+                with self.assertRaisesRegex(mod.InventoryError, 'FOLDER_LIST_FAILED'):
+                    mod.walk_resumable(root, reader=reader)
+            snapshot = mod.load_progress(root)
+            self.assertEqual(snapshot['finished'], [''])
+            self.assertEqual(snapshot['pending'], ['Desktop'])
+            self.assertFalse(mod.inventory_path(root).exists())
+
+    def test_bad_folder_result_never_commits_checkpoint(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            with (patch.object(mod.diagnosis, 'backup_busy', return_value=False),
+                  self.assertRaisesRegex(mod.InventoryError, 'UNSAFE_OR_RECURSIVE')):
+                mod.walk_resumable(root, reader=lambda *_a, **_k: [
+                    file('../escape.txt', 10)])
+            checkpoint = mod.load_progress(root)
+            self.assertEqual(checkpoint['finished'], [])
+            self.assertEqual(checkpoint['pending'], [''])
+            self.assertFalse(mod.inventory_path(root).exists())
+
+    def test_duplicate_file_paths_preserved_but_ambiguous_folders_rejected(self):
+        raw, subdirs = mod.rebase_folder('Desktop',
+                                         [file('same.pdf', 9, 'one'),
+                                          file('same.pdf', 10, 'two')])
+        self.assertEqual(len(raw), 2)
+        self.assertEqual([x['Path'] for x in raw],
+                         ['Desktop/same.pdf', 'Desktop/same.pdf'])
+        self.assertEqual(subdirs, [])
+        with self.assertRaisesRegex(mod.InventoryError,
+                                    'AMBIGUOUS_DIRECTORY_PATH'):
+            mod.rebase_folder('',
+                              [{'Path': 'Same', 'IsDir': True},
+                               {'Path': 'Same', 'IsDir': True}])
+
+    def test_invalid_checkpoint_is_never_used(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            mod.save_progress(root, {'version': 1, 'source': mod.SOURCE,
+                                     'pending': [''], 'finished': [],
+                                     'entries': []})
+            path = mod.progress_path(root)
+            data = json.loads(path.read_text())
+            data['pending'] = ['../escape']
+            path.write_text(json.dumps(data))
+            with self.assertRaisesRegex(mod.InventoryError,
+                                        'INVALID_SAVED_PROGRESS'):
+                mod.load_progress(root)
+
+    def test_status_missing_complete_snapshot_reports_pending_not_failure(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            mod.save_progress(root, {'version': 1, 'source': mod.SOURCE,
+                                     'pending': ['Desktop'], 'finished': [''],
+                                     'entries': [file('root.txt')]})
+            output = io.StringIO()
+            with (patch.object(mod.archive, 'STATE', root),
+                  patch.object(mod.subprocess, 'run',
+                               side_effect=AssertionError('network not allowed')),
+                  contextlib.redirect_stdout(output)):
+                self.assertEqual(mod.run(execute=False), 0)
+            self.assertIn('NO_COMPLETE_SNAPSHOT', output.getvalue())
+            self.assertIn('1 folders completed', output.getvalue())
+            self.assertIn('1 pending', output.getvalue())
+            self.assertNotIn('root.txt', output.getvalue())
+
+    def test_folder_reader_is_nonrecursive_and_preserves_private_names(self):
+        with TemporaryDirectory() as directory:
+            original = subprocess.Popen
+            calls = []
+            def fake(command, **kwargs):
+                calls.append(command)
+                return original([sys.executable, '-c',
+                                 'import sys;sys.stdout.write("[]")'],
+                                **kwargs)
+            with (patch.object(mod.subprocess, 'Popen', side_effect=fake),
+                  patch.object(mod.diagnosis, 'backup_busy',
+                               return_value=False)):
+                self.assertEqual(mod.list_one_folder('Desktop', timeout=10), [])
+            self.assertEqual(calls[0][:3], ['rclone', 'lsjson', 'icloud:Desktop'])
+            self.assertNotIn('--recursive', calls[0])
+
     def test_remote_listing_is_recursive_and_size_capped(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
