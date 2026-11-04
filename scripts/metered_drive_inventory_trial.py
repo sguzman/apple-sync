@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""One-shot, privileged, fail-closed network accounting for Apple Drive inventory.
+"""Explicit, persistent-budget network accounting for Apple Drive inventory.
 
-Launch a TRANSIENT system service as the regular user with IPAccounting=yes.
-Use another independent controller process to poll ingress+egress, terminate
-the entire service cgroup at the soft budget threshold, then show the last
-measurement. No timer or permanent system unit is installed.
+Launch one or more TRANSIENT system services as the regular user with
+IPAccounting=yes. A privileged controller polls ingress+egress and stops the
+whole service cgroup at a soft per-pass threshold. A private, root-owned
+ledger accounts for those measurements across invocations; interrupted runs
+block further work until reconciled. No timer or permanent unit is installed.
 
-IMPORTANT: systemd counters are sampled. There is no exact hardware/network
-byte quota, so bursts may overshoot the threshold. Only use for a short trial.
+IMPORTANT: systemd counters are sampled, NOT a hard network quota. The
+100 MB cumulative target can be exceeded by short bursts.
 """
 from __future__ import annotations
 
