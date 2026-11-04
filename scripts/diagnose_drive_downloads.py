@@ -236,8 +236,9 @@ def diagnose(*, extended: bool = False) -> int:
                 break
             if extended and backup_busy():
                 print('Drive diagnostic DEFER: another backup became active; '
-                      'stopping read-only sampling', flush=True)
-                break
+                      'stopping read-only sampling; Drive archive remains BLOCKED',
+                      flush=True)
+                return 0
             checked += 1
             iwork = is_iwork(entry['Path'])
             saw_iwork |= iwork
