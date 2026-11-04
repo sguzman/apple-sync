@@ -121,7 +121,8 @@ def reconstruct(remote: str, size: int, workspace: Path,
         if diagnosis.backup_busy() or deadline - time.monotonic() < 15:
             raise Deferred()
         offset = state['committed']
-        count = min(CHUNK_BYTES, size - offset)
+        # Exercise a genuine multi-chunk resume even for small samples.
+        count = min(CHUNK_BYTES, max(4096, size // 3), size - offset)
         temp, digest, accepted, _requested, _exhausted = archive.fetch_chunk_with_retry(
             remote, offset, count, part.parent, deadline,
             budget=min(16 * 1024 * 1024, MAX_FILE_BYTES * 2),
