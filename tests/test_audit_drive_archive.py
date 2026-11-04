@@ -35,7 +35,7 @@ class AuditDriveArchiveTests(unittest.TestCase):
                 'entries': entries})
             output = mod.report(state_root=root, destination=archive)
             self.assertIn('PARTIAL_SOURCE_CHECKPOINT', output)
-            self.assertIn('Size-matching existing files (NOT independently verified): 1',
+            self.assertIn('Size-matching files without a valid verification receipt: 1',
                           output)
             self.assertIn('Existing files with incorrect size: 1', output)
             self.assertIn('Destination files missing: 1', output)
@@ -115,6 +115,71 @@ class AuditDriveArchiveTests(unittest.TestCase):
             mount_check.assert_called_once_with(dest)
             self.assertIn('Destination files missing: 1', output.getvalue())
             self.assertFalse((dest / 'missing.bin').exists())
+
+    def test_receipted_new_file_hash_is_verified_against_local_bytes(self):
+        import hashlib
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest = root / 'archive'
+            dest.mkdir()
+            data = b'Two identical remote reads verified these bytes.'
+            entry = file('recorded.bin', len(data))
+            (dest / 'recorded.bin').write_bytes(data)
+            mod.inventory.save(root, [entry])
+            mod.receipts.create_receipt(
+                root, entry, hashlib.sha256(data).hexdigest())
+            report = mod.report(state_root=root, destination=dest)
+            self.assertIn(
+                'Files with valid dual-whole-read receipt and matching local SHA-256: 1',
+                report)
+            self.assertIn(
+                f'Bytes verified by receipt and current local SHA-256: {len(data)}',
+                report)
+            self.assertIn(
+                'Size-matching files without a valid verification receipt: 0',
+                report)
+            self.assertNotIn('recorded.bin', report)
+
+    def test_tampered_same_size_archive_not_verified_even_with_receipt(self):
+        import hashlib
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest = root / 'archive'
+            dest.mkdir()
+            data = b'original'
+            entry = file('tampered.bin', len(data))
+            target = dest / entry['Path']
+            target.write_bytes(data)
+            mod.inventory.save(root, [entry])
+            mod.receipts.create_receipt(
+                root, entry, hashlib.sha256(data).hexdigest())
+            target.write_bytes(b'X' * len(data))
+            report = mod.report(state_root=root, destination=dest)
+            self.assertIn('Receipt SHA-256 mismatches: 1', report)
+            self.assertIn(
+                'Files with valid dual-whole-read receipt and matching local SHA-256: 0',
+                report)
+            self.assertIn(
+                'Size-matching files without a valid verification receipt: 1',
+                report)
+
+    def test_changed_cloud_identity_invalidates_receipt_without_cloud_call(self):
+        import hashlib
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest = root / 'archive'
+            dest.mkdir()
+            data = b'original'
+            entry = file('source-changed.bin', len(data))
+            (dest / entry['Path']).write_bytes(data)
+            mod.receipts.create_receipt(
+                root, entry, hashlib.sha256(data).hexdigest())
+            mod.inventory.save(root, [{**entry, 'ModTime': 'later'}])
+            report = mod.report(state_root=root, destination=dest)
+            self.assertIn('Invalid/inaccessible receipt records: 1', report)
+            self.assertIn(
+                'Files with valid dual-whole-read receipt and matching local SHA-256: 0',
+                report)
 
     def test_no_inventory_returns_cautious_report(self):
         with TemporaryDirectory() as directory:
