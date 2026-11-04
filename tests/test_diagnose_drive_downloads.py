@@ -172,8 +172,8 @@ class DriveDownloadDiagnosisTests(unittest.TestCase):
         import subprocess
         names = []
         def status(cmd, **_kwargs):
-            names.append(cmd[4])
-            return subprocess.CompletedProcess(cmd, 0, 'inactive\\n', '')
+            names.append(cmd[3])
+            return subprocess.CompletedProcess(cmd, 0, 'inactive\n', '')
         with patch.object(mod.subprocess, 'run', side_effect=status):
             self.assertFalse(mod.backup_busy())
         self.assertEqual(tuple(names), mod.BUSY_UNITS)
@@ -200,12 +200,10 @@ class DriveDownloadDiagnosisTests(unittest.TestCase):
         self.assertIn('no idle window', output.getvalue())
 
     def test_main_wait_idle_deferral_does_not_run_diagnosis(self):
-        with (patch.object(mod, 'wait_for_idle', return_value=False),
-              patch.object(mod, 'diagnose') as diagnostic,
-              patch.object(mod, 'argparse') as parser):
-            # Exercise the CLI with the real parser while mocking only work.
-            parser.ArgumentParser.return_value.parse_args.return_value.extended = True
-            parser.ArgumentParser.return_value.parse_args.return_value.wait_idle = True
+        with (patch('sys.argv', ['diagnose_drive_downloads.py',
+                                 '--extended', '--wait-idle']),
+              patch.object(mod, 'wait_for_idle', return_value=False),
+              patch.object(mod, 'diagnose') as diagnostic):
             self.assertEqual(mod.main(), 0)
         diagnostic.assert_not_called()
 
