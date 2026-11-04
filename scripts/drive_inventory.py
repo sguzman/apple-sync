@@ -27,6 +27,12 @@ SOURCE = 'icloud:'
 NAME = 'drive-file-inventory.json'
 MAX_OUTPUT_BYTES = 128 * 1024 * 1024
 LIST_SECONDS = 25 * 60
+PROGRESS_NAME = 'drive-inventory-progress.json'
+WALK_SECONDS = 12 * 60
+FOLDER_SECONDS = 120
+MAX_FOLDER_OUTPUT_BYTES = 8 * 1024 * 1024
+MAX_TOTAL_RECORDS = 250000
+MAX_PENDING_FOLDERS = 100000
 
 
 class InventoryError(Exception):
@@ -205,12 +211,185 @@ def fetch_listing_to_file(state_root: Path, *,
         Path(temp).unlink(missing_ok=True)
 
 
-def refresh(state_root: Path, *, timeout: float = LIST_SECONDS) -> dict:
+def progress_path(state_root: Path) -> Path:
+    return state_root / PROGRESS_NAME
+
+
+def safe_folder(folder: object) -> bool:
+    return folder == '' or diagnosis.valid_path(folder)
+
+
+def load_progress(state_root: Path) -> dict | None:
+    path = progress_path(state_root)
+    if state_root.is_symlink() or path.is_symlink():
+        raise InventoryError('UNSAFE_PROGRESS_PATH')
+    if not path.exists():
+        return None
+    if path.stat().st_mode & 0o077:
+        raise InventoryError('PROGRESS_PERMISSIONS_NOT_PRIVATE')
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError) as exc:
+        raise InventoryError('INVALID_SAVED_PROGRESS') from exc
+    if not isinstance(data, dict) or data.get('version') != 1 or data.get('source') != SOURCE:
+        raise InventoryError('INVALID_SAVED_PROGRESS')
+    pending, finished, entries = (data.get('pending'), data.get('finished'),
+                                  data.get('entries'))
+    if not (isinstance(pending, list) and isinstance(finished, list)
+            and isinstance(entries, list)
+            and len(pending) <= MAX_PENDING_FOLDERS
+            and len(finished) <= MAX_PENDING_FOLDERS
+            and len(entries) <= MAX_TOTAL_RECORDS
+            and all(safe_folder(v) for v in pending + finished)
+            and len(set(pending + finished)) == len(pending + finished)):
+        raise InventoryError('INVALID_SAVED_PROGRESS')
+    if entries:
+        inspect_entries(entries)
+    return data
+
+
+def save_progress(state_root: Path, data: dict) -> None:
+    """Atomically save a complete folder checkpoint with restrictive permissions."""
+    path = progress_path(state_root)
+    if state_root.is_symlink() or path.is_symlink():
+        raise InventoryError('UNSAFE_PROGRESS_PATH')
+    if (len(data['entries']) > MAX_TOTAL_RECORDS or
+            len(data['pending']) + len(data['finished']) > MAX_PENDING_FOLDERS):
+        raise InventoryError('PROGRESS_LIMIT_EXCEEDED')
+    state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    encoded = json.dumps(data, ensure_ascii=False).encode('utf-8')
+    if len(encoded) > MAX_OUTPUT_BYTES:
+        raise InventoryError('PROGRESS_TOO_LARGE')
+    fd, temp = tempfile.mkstemp(prefix='.drive-checkpoint-', dir=state_root)
+    try:
+        with os.fdopen(fd, 'wb') as output:
+            output.write(encoded)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temp, path)
+    finally:
+        if os.path.exists(temp):
+            os.unlink(temp)
+
+
+def list_one_folder(folder: str, *, timeout: float = FOLDER_SECONDS) -> list[dict]:
+    """Nonrecursive, bounded rclone listing for exactly one Drive directory."""
+    if not safe_folder(folder):
+        raise InventoryError('UNSAFE_FOLDER')
+    remote = SOURCE + folder
+    command = ['rclone', 'lsjson', remote, '--checkers', '1',
+               '--tpslimit', '2', '--log-level', 'ERROR']
+    deadline = time.monotonic() + timeout
+    process = None
+    payload = bytearray()
+    try:
+        try:
+            process = subprocess.Popen(command, stdout=subprocess.PIPE,
+                                       stderr=subprocess.DEVNULL)
+        except OSError as exc:
+            raise InventoryError('RCLONE_START_FAILED') from exc
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise InventoryError('FOLDER_LIST_TIMEOUT')
+                if diagnosis.backup_busy():
+                    raise InventoryDeferred()
+                if not selector.select(min(5, remaining)):
+                    continue
+                block = os.read(process.stdout.fileno(), 65536)
+                if not block:
+                    break
+                payload.extend(block)
+                if len(payload) > MAX_FOLDER_OUTPUT_BYTES:
+                    raise InventoryError('FOLDER_LIST_TOO_LARGE')
+        try:
+            exit_code = process.wait(timeout=max(0.1, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired as exc:
+            raise InventoryError('FOLDER_LIST_TIMEOUT') from exc
+        if exit_code:
+            raise InventoryError('FOLDER_LIST_FAILED')
+        try:
+            results = json.loads(payload)
+        except (ValueError, UnicodeError) as exc:
+            raise InventoryError('INVALID_FOLDER_JSON') from exc
+        if not isinstance(results, list):
+            raise InventoryError('INVALID_FOLDER_LISTING')
+        return results
+    finally:
+        if process is not None:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            process.stdout.close()
+
+
+def rebase_folder(folder: str, children: list[dict]) -> tuple[list[dict], list[str]]:
+    """Validate immediate children, preserve duplicate files, enqueue unique dirs."""
+    entries, subfolders = [], []
+    directory_paths = set()
+    for item in children:
+        if not isinstance(item, dict):
+            raise InventoryError('INVALID_FOLDER_ENTRY')
+        name = item.get('Path')
+        if (not diagnosis.valid_path(name) or '/' in name):
+            raise InventoryError('UNSAFE_OR_RECURSIVE_FOLDER_ENTRY')
+        full_name = (folder + '/' if folder else '') + name
+        entry = {**item, 'Path': full_name}
+        if entry.get('IsDir') is True:
+            if full_name in directory_paths:
+                raise InventoryError('AMBIGUOUS_DIRECTORY_PATH')
+            directory_paths.add(full_name)
+            subfolders.append(full_name)
+        entries.append(entry)
+    if entries:
+        inspect_entries(entries)
+    return entries, subfolders
+
+
+def walk_resumable(state_root: Path, *, timeout: float = WALK_SECONDS,
+                   reader=None) -> tuple[bool, dict]:
+    """Commit each completely listed folder; resume without repeating it."""
+    if reader is None:
+        reader = list_one_folder
+    progress = load_progress(state_root)
+    if progress is None:
+        progress = {'version': 1, 'source': SOURCE, 'pending': [''],
+                    'finished': [], 'entries': []}
+        save_progress(state_root, progress)
+    deadline = time.monotonic() + timeout
+    while progress['pending'] and deadline - time.monotonic() > 15:
+        if diagnosis.backup_busy():
+            return False, progress
+        folder = progress['pending'][0]
+        try:
+            children = reader(folder, timeout=min(FOLDER_SECONDS,
+                                                 deadline - time.monotonic()))
+        except InventoryDeferred:
+            return False, progress
+        entries, subfolders = rebase_folder(folder, children)
+        already = set(progress['pending'] + progress['finished'])
+        next_folders = [name for name in subfolders if name not in already]
+        next_progress = {'version': 1, 'source': SOURCE,
+                         'pending': progress['pending'][1:] + next_folders,
+                         'finished': progress['finished'] + [folder],
+                         'entries': progress['entries'] + entries}
+        save_progress(state_root, next_progress)
+        progress = next_progress
+    if progress['pending']:
+        return False, progress
+    stats = save(state_root, progress['entries'])
+    progress_path(state_root).unlink()
+    return True, stats
+
+
+def refresh(state_root: Path, *, timeout: float = WALK_SECONDS) -> tuple[bool, dict]:
+    """Resumable folder walk; never throw away completed folder listings."""
     if state_root.is_symlink():
         raise InventoryError('UNSAFE_INVENTORY_DESTINATION')
     state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    entries = fetch_listing_to_file(state_root, timeout=timeout)
-    return save(state_root, entries)
+    return walk_resumable(state_root, timeout=timeout)
 
 
 def format_summary(prefix: str, stats: dict) -> str:
@@ -225,9 +404,21 @@ def format_summary(prefix: str, stats: dict) -> str:
 
 def run(*, execute: bool = False, wait_idle: bool = False) -> int:
     if not execute:
-        _, stats = load(archive.STATE)
-        print(format_summary('Drive cached inventory (no network call)', stats),
-              flush=True)
+        try:
+            _, stats = load(archive.STATE)
+            print(format_summary('Drive cached inventory (no network call)', stats),
+                  flush=True)
+        except InventoryError as exc:
+            if str(exc) != 'INVENTORY_NOT_CREATED':
+                raise
+            print('Drive inventory: NO_COMPLETE_SNAPSHOT', flush=True)
+        progress = load_progress(archive.STATE)
+        if progress is not None:
+            print(f'Drive inventory checkpoint: '
+                  f'{len(progress["finished"])} folders completed; '
+                  f'{len(progress["pending"])} pending; '
+                  f'{len(progress["entries"])} records saved; '
+                  'no network call', flush=True)
         return 0
     archive.safe_directory(archive.SOURCES['drive'][1])
     if archive.STATE.is_symlink():
@@ -257,15 +448,19 @@ def run(*, execute: bool = False, wait_idle: bool = False) -> int:
             print('Drive inventory DEFER: another backup active before listing',
                   flush=True)
             return 0
-        print('Drive inventory: one explicitly requested remote metadata '
-              'enumeration; no file content downloads', flush=True)
-        try:
-            stats = refresh(archive.STATE)
-        except InventoryDeferred:
-            print('Drive inventory DEFER: another backup became active; '
-                  'previous snapshot preserved', flush=True)
-            return 0
-        print(format_summary('Drive inventory saved privately', stats), flush=True)
+        print('Drive inventory: resumable folder-by-folder metadata listing; '
+              'no file downloads', flush=True)
+        complete, details = refresh(archive.STATE)
+        if complete:
+            print(format_summary('Drive inventory saved privately', details),
+                  flush=True)
+        else:
+            print(f'Drive inventory PARTIAL: '
+                  f'{len(details["finished"])} folders completed; '
+                  f'{len(details["pending"])} pending; '
+                  f'{len(details["entries"])} records checkpointed; '
+                  'continue with the same command after backups go idle',
+                  flush=True)
     return 0
 
 
