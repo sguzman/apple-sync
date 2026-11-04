@@ -187,7 +187,8 @@ def run(*, execute: bool = False, wait_idle: bool = False,
                     list_reader=lambda _scope, left, folder=folder:
                         safe_recheck(_scope, left, folder),
                     record_receipt=True)
-            except (pilot.PilotError, pilot.verification.VerificationError,
+            except (pilot.PilotError, pilot.receipts.ReceiptError,
+                    pilot.verification.VerificationError,
                     pilot.verification.Deferred, inventory.InventoryError,
                     RuntimeError, OSError, ValueError):
                 result = 'DEFER_VERIFICATION_ERROR'
