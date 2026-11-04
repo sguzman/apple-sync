@@ -57,6 +57,8 @@ class MeteredDriveTrialTests(unittest.TestCase):
         self.assertIn('--property=TimeoutStopSec=5s', command)
         self.assertIn('--property=KillMode=control-group', command)
         self.assertIn('--setenv=XDG_RUNTIME_DIR=/run/user/1000', command)
+        self.assertIn('--setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus',
+                      command)
         self.assertEqual(command[-2:], ['/usr/bin/python3', '/fake'])
         self.assertNotIn('--on-calendar', ' '.join(command))
 
@@ -90,8 +92,10 @@ class MeteredDriveTrialTests(unittest.TestCase):
         with (patch.object(metered, 'start') as start,
               patch.object(metered, 'props', return_value=sample),
               patch.object(metered, 'stop') as stop,
+              patch.object(metered, 'report_trial_service_log') as log,
               contextlib.redirect_stdout(stdout)):
             metered.trial('trial.service')
+        log.assert_called_once_with('trial.service')
         start.assert_called_once()
         stop.assert_called_once_with('trial.service')
         self.assertIn('SOFT_BUDGET_REACHED', stdout.getvalue())
@@ -105,8 +109,10 @@ class MeteredDriveTrialTests(unittest.TestCase):
         with (patch.object(metered, 'start'),
               patch.object(metered, 'props', return_value=sample),
               patch.object(metered, 'stop') as stop,
+              patch.object(metered, 'report_trial_service_log') as log,
               contextlib.redirect_stdout(stdout)):
             metered.trial('trial.service')
+        log.assert_called_once()
         stop.assert_called_once()
         self.assertIn('WORKER_FINISHED', stdout.getvalue())
         self.assertIn('MEASURED IP TOTAL: 579', stdout.getvalue())
@@ -117,6 +123,7 @@ class MeteredDriveTrialTests(unittest.TestCase):
               patch.object(metered, 'props',
                            return_value={'IPAccounting': 'no'}),
               patch.object(metered, 'stop') as stop,
+              patch.object(metered, 'report_trial_service_log'),
               contextlib.redirect_stdout(stdout)):
             with self.assertRaises(metered.TrialError):
                 metered.trial('trial.service')
@@ -130,6 +137,56 @@ class MeteredDriveTrialTests(unittest.TestCase):
             with self.assertRaisesRegex(metered.TrialError, 'WORKER_NOT_FOUND'):
                 metered.guard_setup()
         run.assert_not_called()
+
+    def test_worker_entry_detects_unreachable_user_manager(self):
+        failed = subprocess.CompletedProcess([], 1, '', 'Failed to connect to bus')
+        out = io.StringIO()
+        with (patch.object(metered, 'run', return_value=failed),
+              patch.object(metered.os, 'execv') as execv,
+              contextlib.redirect_stdout(out)):
+            self.assertEqual(metered.worker_entry(), 3)
+        self.assertIn('USER_MANAGER_STATUS_UNAVAILABLE', out.getvalue())
+        execv.assert_not_called()
+
+    def test_worker_entry_detects_active_backup_and_skips_inventory(self):
+        idle = subprocess.CompletedProcess([], 0, 'inactive\n', '')
+        busy = subprocess.CompletedProcess([], 0, 'active\n', '')
+        out = io.StringIO()
+        with (patch.object(metered, 'run', side_effect=[idle, busy]),
+              patch.object(metered.os, 'execv') as execv,
+              contextlib.redirect_stdout(out)):
+            self.assertEqual(metered.worker_entry(), 3)
+        self.assertIn('OTHER_BACKUP_ACTIVE apple-sync-photos.service',
+                      out.getvalue())
+        execv.assert_not_called()
+
+    def test_worker_entry_execs_existing_worker_only_after_four_idle_checks(self):
+        idle = subprocess.CompletedProcess([], 0, 'inactive\n', '')
+        calls = []
+        out = io.StringIO()
+        with (patch.object(metered, 'run', side_effect=lambda c, **kw:
+                           (calls.append(c), idle)[1]),
+              patch.object(metered.os, 'execv') as execv,
+              contextlib.redirect_stdout(out)):
+            self.assertEqual(metered.worker_entry(), 0)
+        self.assertEqual(len(calls), len(metered.BUSY_UNITS))
+        execv.assert_called_once()
+        worker_command = execv.call_args.args[1]
+        self.assertIn('drive_inventory.py', worker_command[1])
+        self.assertEqual(worker_command[-2:], ['--execute', '--resume-only'])
+        self.assertIn('TRIAL_USER_MANAGER_OK', out.getvalue())
+
+    def test_log_reports_only_sanitized_worker_status(self):
+        out = io.StringIO()
+        journal = subprocess.CompletedProcess(
+            [], 0, 'secret-filename.pdf\nTRIAL_BLOCKED: sample\n'
+            'Drive inventory DEFER: backup active\n', '')
+        with (patch.object(metered, 'run', return_value=journal),
+              contextlib.redirect_stdout(out)):
+            metered.report_trial_service_log('trial.service')
+        self.assertNotIn('secret-filename', out.getvalue())
+        self.assertIn('TRIAL_BLOCKED: sample', out.getvalue())
+        self.assertIn('Drive inventory DEFER:', out.getvalue())
 
     def test_explicit_execution_required(self):
         out = io.StringIO()
