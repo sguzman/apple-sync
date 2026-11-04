@@ -166,6 +166,106 @@ class ChunkTests(unittest.TestCase):
                             destination, state, execute=True)
                 self.assertEqual((destination / 'sample.HEIC').read_bytes(), data)
 
+    def test_range_retry_uses_smaller_request_and_discards_failed_data(self):
+        import hashlib
+        import time
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            calls = []
+            def flaky_reader(remote, offset, count, temp, remaining_seconds):
+                calls.append((offset, count))
+                if len(calls) == 1:
+                    temp.write_bytes(b'CORRUPTED')
+                    raise RuntimeError('short range')
+                good = b'Z' * count
+                temp.write_bytes(good)
+                return hashlib.sha256(good).hexdigest()
+            with patch.object(mod, 'MIN_RETRY_CHUNK', 1):
+                temp, digest, length, requested, exhausted = mod.fetch_chunk_with_retry(
+                    'icloudphotos:example', 9, 8, root, time.monotonic() + 90, 20,
+                    reader=flaky_reader, sleeper=lambda _delay: None)
+            self.assertFalse(exhausted)
+            self.assertEqual(calls, [(9, 8), (9, 4)])
+            self.assertEqual((length, requested), (4, 12))
+            self.assertEqual(temp.read_bytes(), b'ZZZZ')
+            self.assertEqual(digest, hashlib.sha256(b'ZZZZ').hexdigest())
+            temp.unlink()
+            self.assertEqual(list(root.iterdir()), [])
+
+    def test_range_retries_respect_budget_and_do_not_leave_bad_temps(self):
+        import time
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            attempts = []
+            def short_reader(remote, offset, count, temp, remaining):
+                attempts.append(count)
+                temp.write_bytes(b'bad')
+                raise RuntimeError('remote short response')
+            with patch.object(mod, 'MIN_RETRY_CHUNK', 1):
+                result = mod.fetch_chunk_with_retry(
+                    'icloudphotos:example', 0, 8, root, time.monotonic() + 90, 12,
+                    reader=short_reader, sleeper=lambda _delay: None)
+            self.assertEqual(attempts, [8, 4])
+            self.assertEqual(result, (None, None, 0, 12, True))
+            self.assertEqual(list(root.iterdir()), [])
+
+    def test_range_retry_never_expands_a_small_end_of_file_request(self):
+        import hashlib
+        import time
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            counts = []
+            def reader(remote, offset, count, temp, remaining):
+                counts.append(count)
+                if len(counts) == 1:
+                    temp.write_bytes(b'x')
+                    raise RuntimeError('short')
+                temp.write_bytes(b'a' * count)
+                return hashlib.sha256(b'a' * count).hexdigest()
+            temp, digest, length, requested, failed = mod.fetch_chunk_with_retry(
+                'icloudphotos:example', 0, 3, root, time.monotonic() + 90, 20,
+                reader=reader, sleeper=lambda _delay: None)
+            self.assertEqual(counts, [3, 3])
+            self.assertFalse(failed)
+            self.assertEqual((length, requested), (3, 6))
+            temp.unlink()
+
+    def test_full_preview_recovers_after_transient_short_range(self):
+        import hashlib
+        import subprocess
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest = root / 'archive'
+            dest.mkdir()
+            state = root / 'state'
+            data = b'abcdefgh'
+            entry = {'Path': 'sample.bin', 'Size': len(data),
+                     'ModTime': 'stable', 'ID': 'id-1'}
+            listing = subprocess.CompletedProcess([], 0, json.dumps([entry]), '')
+            calls = []
+            def stream(remote, offset, count, temp, remaining):
+                calls.append((offset, count))
+                if len(calls) == 1:
+                    temp.write_bytes(b'partial bad')
+                    raise RuntimeError('network interruption')
+                good = data[offset:offset+count]
+                temp.write_bytes(good)
+                return hashlib.sha256(good).hexdigest()
+            with (patch.object(mod.subprocess, 'run', return_value=listing),
+                  patch.object(mod, 'stream_range', side_effect=stream),
+                  patch.object(mod, 'MAX_BYTES', 24),
+                  patch.object(mod, 'CHUNK_BYTES', 8),
+                  patch.object(mod, 'MIN_RETRY_CHUNK', 1),
+                  patch.object(mod.time, 'sleep', return_value=None)):
+                self.assertEqual(mod.preview('photos-album-animated',
+                                             'icloudphotos:PrimarySync/Animated',
+                                             dest, state, execute=True), 0)
+            self.assertEqual(calls, [(0, 8), (0, 4), (4, 4)])
+            self.assertEqual((dest / 'sample.bin').read_bytes(), data)
+            part, meta = mod.state_paths(state, 'photos-album-animated', 'sample.bin')
+            self.assertFalse(part.exists())
+            self.assertFalse(meta.exists())
+
     def test_path_safety(self):
         for bad in ('../evil', '/absolute', 'x//y', 'x/./y', 'x/../y', '', 'a\npath'):
             self.assertIsNone(mod.safe_path(bad))
