@@ -158,6 +158,7 @@ class CachedBatchTests(unittest.TestCase):
                 file('large-three.bin', 11 * mod.MIB, 'third')])
             invoked = []
             def fake_publish(scope, entry, *_args, **kwargs):
+                self.assertIs(kwargs.get('record_receipt'), True)
                 self.assertIsNotNone(kwargs.get('whole_reader'))
                 invoked.append((scope, entry['Path'], entry['Size'],
                                 kwargs['whole_reader']))
@@ -257,6 +258,7 @@ class CachedBatchTests(unittest.TestCase):
                                        file('b-empty.txt', 0)])
             seen = []
             def publish(_scope, entry, *_args, **_kwargs):
+                self.assertIs(_kwargs.get('record_receipt'), True)
                 seen.append(entry['Path'])
                 return 'PUBLISHED_VERIFIED'
             output = io.StringIO()
@@ -431,6 +433,7 @@ class CachedBatchTests(unittest.TestCase):
             mod.inventory.save(state, entries)
             called = []
             def publish(scope, entry, *_a, **_kw):
+                self.assertIs(_kw.get('record_receipt'), True)
                 called.append((scope, entry['Path']))
                 return 'PUBLISHED_VERIFIED'
             output = io.StringIO()
