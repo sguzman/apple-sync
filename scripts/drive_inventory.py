@@ -22,6 +22,7 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import archive_batch as archive
 import diagnose_drive_downloads as diagnosis
+import drive_inventory_rc as rc_reader
 
 SOURCE = 'icloud:'
 NAME = 'drive-file-inventory.json'
@@ -384,12 +385,31 @@ def walk_resumable(state_root: Path, *, timeout: float = WALK_SECONDS,
     return True, stats
 
 
-def refresh(state_root: Path, *, timeout: float = WALK_SECONDS) -> tuple[bool, dict]:
-    """Resumable folder walk; never throw away completed folder listings."""
+def refresh(state_root: Path, *, timeout: float = WALK_SECONDS,
+            persistent_rc: bool = False) -> tuple[bool, dict]:
+    """Resumable folder walk; never throw away completed folder listings.
+
+    Persistent RC is opt-in until live metered performance and listing
+    equivalence have been verified. The default legacy reader is unchanged.
+    """
     if state_root.is_symlink():
         raise InventoryError('UNSAFE_INVENTORY_DESTINATION')
     state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    return walk_resumable(state_root, timeout=timeout)
+    if not persistent_rc:
+        return walk_resumable(state_root, timeout=timeout)
+
+    try:
+        with rc_reader.RcloneRCReader(state_root) as reader:
+            def read(folder: str, *, timeout: float) -> list[dict]:
+                try:
+                    return reader(folder, timeout=timeout)
+                except rc_reader.RcloneRCDeferred:
+                    raise InventoryDeferred() from None
+                except rc_reader.RcloneRCError as exc:
+                    raise InventoryError(str(exc)) from None
+            return walk_resumable(state_root, timeout=timeout, reader=read)
+    except rc_reader.RcloneRCError as exc:
+        raise InventoryError(str(exc)) from None
 
 
 def format_summary(prefix: str, stats: dict) -> str:
@@ -416,7 +436,7 @@ def resume_needed(state_root: Path) -> bool:
 
 
 def run(*, execute: bool = False, wait_idle: bool = False,
-        resume_only: bool = False) -> int:
+        resume_only: bool = False, persistent_rc: bool = False) -> int:
     if resume_only and not execute:
         raise InventoryError('RESUME_ONLY_REQUIRES_EXECUTE')
 
@@ -473,9 +493,14 @@ def run(*, execute: bool = False, wait_idle: bool = False,
             print('Drive inventory COMPLETE: existing snapshot retained; '
                   'resume-only mode makes no remote calls', flush=True)
             return 0
-        print('Drive inventory: resumable folder-by-folder metadata listing; '
-              'no file downloads', flush=True)
-        complete, details = refresh(archive.STATE)
+        if persistent_rc:
+            print('Drive inventory: OPTIONAL persistent-rclone-RC metadata '
+                  'listing; no file downloads', flush=True)
+            complete, details = refresh(archive.STATE, persistent_rc=True)
+        else:
+            print('Drive inventory: resumable folder-by-folder metadata listing; '
+                  'no file downloads', flush=True)
+            complete, details = refresh(archive.STATE)
         if complete:
             print(format_summary('Drive inventory saved privately', details),
                   flush=True)
@@ -498,6 +523,9 @@ def main() -> int:
     parser.add_argument('--resume-only', action='store_true',
                         help='resume first inventory until complete, then skip '
                         'all further remote calls; intended for optional timer')
+    parser.add_argument('--persistent-rc', action='store_true',
+                        help='opt-in experimental persistent rclone session '
+                             'for listing folders without restarting backend')
     args = parser.parse_args()
     if args.wait_idle and not args.execute:
         parser.error('--wait-idle requires --execute')
@@ -505,7 +533,8 @@ def main() -> int:
         parser.error('--resume-only requires --execute')
     try:
         return run(execute=args.execute, wait_idle=args.wait_idle,
-                   resume_only=args.resume_only)
+                   resume_only=args.resume_only,
+                   persistent_rc=args.persistent_rc)
     except (InventoryError, RuntimeError, OSError, subprocess.SubprocessError) as exc:
         print('Drive inventory: ' +
               (str(exc) if isinstance(exc, InventoryError)
