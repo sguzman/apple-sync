@@ -458,6 +458,40 @@ The original user timer must remain disabled:
 
     systemctl --user show apple-sync-drive-inventory.timer -p ActiveState
 
+### Experimental persistent-rclone reader (optional)
+
+The default scanner starts a new `rclone lsjson` process for **each**
+folder. The opt-in `--persistent-rc` mode instead starts one rclone
+`rcd` server per metered worker, reuses its in-process iCloud backend
+session for multiple `operations/list` calls and shuts it down at the
+end of the pass. The server listens only on a Unix socket inside a
+0700 private temporary directory under the existing archive state
+directory; there is **no TCP listener** and no new permanent service.
+Each `rclone rc` invocation is a local socket client. Responses must
+contain nonrecursive, immediate-child metadata paths under exactly the
+requested folder. The code rebases them to the same path format as
+the legacy `lsjson` reader and retains file IDs, sizes and timestamps.
+
+This is a candidate optimization, not an established bandwidth saving.
+It is **off by default**, including for the original unattended user
+timer and all existing tests of the legacy reader. A failed or
+unexpected RC response cannot mark a folder complete. The original
+archive lock, backup-activity checks, 90-second metered service and
+cumulative 100 MB soft budget are unchanged. Rclone may still make
+one or more Apple requests per folder, even in this mode.
+
+For an initial measured A/B comparison, run a single opt-in pass
+when other backup services are idle:
+
+    sudo /usr/bin/python3 scripts/metered_drive_inventory_trial.py --execute --passes 1 --persistent-rc
+    python3 scripts/drive_inventory.py
+
+Compare the `MEASURED IP INGRESS` and `MEASURED IP EGRESS`
+values **per completed folder** against the previous legacy passes,
+not just raw total bytes per pass. The remaining subtree composition
+may vary, so a one-pass result only provides preliminary evidence.
+Do **not** enable the original hourly scanner as a result.
+
 Preview without root, Apple requests or ledger writes:
 
     python3 scripts/metered_drive_inventory_trial.py
