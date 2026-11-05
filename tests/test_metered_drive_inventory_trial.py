@@ -312,6 +312,38 @@ class MeteredDriveTrialTests(unittest.TestCase):
             self.assertEqual(metered.main(), 0)
         self.assertEqual(trial.call_args.kwargs['stop_at'], 12345)
 
+    def test_opt_in_persistent_reader_runs_only_when_explicit(self):
+        out = io.StringIO()
+        with (patch.object(metered, 'guard_setup'),
+              patch.object(metered, 'BudgetLedger') as budget_ledger,
+              patch.object(metered, 'preflight'),
+              patch.object(metered, 'trial', return_value=(100, 200)) as trial,
+              patch.object(metered.os, 'geteuid', return_value=0),
+              patch('sys.argv', ['metered', '--execute', '--persistent-rc']),
+              contextlib.redirect_stdout(out)):
+            ledger = budget_ledger.return_value.__enter__.return_value
+            ledger.remaining = metered.CAP_BYTES
+            ledger.summary.return_value = 'status'
+            self.assertEqual(metered.main(), 0)
+        self.assertTrue(trial.call_args.kwargs['persistent_rc'])
+        self.assertIn('reader=persistent-rc', out.getvalue())
+
+    def test_persistent_mode_flag_passed_to_original_worker(self):
+        idle = subprocess.CompletedProcess([], 0, 'inactive\n', '')
+        with (patch.object(metered, 'run', return_value=idle),
+              patch.object(metered.os, 'execv') as execv,
+              contextlib.redirect_stdout(io.StringIO())):
+            metered.worker_entry(persistent_rc=True)
+        args = execv.call_args.args[1]
+        self.assertEqual(args[-3:],
+                         ['--execute', '--resume-only', '--persistent-rc'])
+
+    def test_persistent_worker_entry_flag_passthrough(self):
+        with (patch.object(metered, 'worker_entry', return_value=0) as entry,
+              patch('sys.argv', ['metered', '--worker-entry', '--persistent-rc'])):
+            self.assertEqual(metered.main(), 0)
+        entry.assert_called_once_with(persistent_rc=True)
+
     def test_user_timer_active_is_a_hard_blocker(self):
         class FakeUser:
             pw_uid = 1000
