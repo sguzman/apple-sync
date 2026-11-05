@@ -170,7 +170,7 @@ def preflight(unit: str) -> None:
         stop(unit)
 
 
-def worker_entry() -> int:
+def worker_entry(*, persistent_rc: bool = False) -> int:
     """Executed inside the transient system service as the regular user.
 
     Distinguish a genuinely active backup from an inaccessible user manager
@@ -198,8 +198,10 @@ def worker_entry() -> int:
             return 3
     print('TRIAL_USER_MANAGER_OK: proceeding with original backup locks',
           flush=True)
-    os.execv('/usr/bin/python3',
-             ['/usr/bin/python3', str(WORKER), '--execute', '--resume-only'])
+    args = ['/usr/bin/python3', str(WORKER), '--execute', '--resume-only']
+    if persistent_rc:
+        args.append('--persistent-rc')
+    os.execv('/usr/bin/python3', args)
     return 0
 
 
@@ -218,11 +220,14 @@ def report_trial_service_log(unit: str) -> None:
             print(line, flush=True)
 
 
-def trial(unit: str, *, stop_at: int = STOP_BYTES) -> tuple[int, int]:
+def trial(unit: str, *, stop_at: int = STOP_BYTES,
+          persistent_rc: bool = False) -> tuple[int, int]:
     # Launch a same-context user-manager check, then exec the original
     # resumable inventory. This prevents silent zero-byte deferrals.
     args = ['/usr/bin/python3', str(REPO / 'scripts'
             / 'metered_drive_inventory_trial.py'), '--worker-entry']
+    if persistent_rc:
+        args.append('--persistent-rc')
     largest_ingress = largest_egress = 0
     reason = 'TIME_LIMIT'
     began = time.monotonic()
@@ -290,9 +295,12 @@ def main() -> int:
                         help='number of 90-second metered passes (1-24)')
     parser.add_argument('--status', action='store_true',
                         help='show cumulative budget without contacting Apple')
+    parser.add_argument('--persistent-rc', action='store_true',
+                        help='opt-in experimental persistent rclone listing '
+                             'backend; use a short measured comparison first')
     args = parser.parse_args()
     if args.worker_entry:
-        return worker_entry()
+        return worker_entry(persistent_rc=args.persistent_rc)
     if not (1 <= args.passes <= 24):
         parser.error('--passes must be between 1 and 24')
     if args.status and args.execute:
@@ -331,13 +339,18 @@ def main() -> int:
                 cutoff = min(STOP_BYTES, ledger.remaining - RESERVE_BYTES)
                 unit = f'apple-sync-drive-metered-{nonce}-{index}.service'
                 print(f'METERED PASS {index + 1}/{args.passes}: '
+                      f'reader={"persistent-rc" if args.persistent_rc else "legacy-lsjson"}, '
                       f'sampled cutoff={cutoff} bytes, '
                       f'remaining cumulative budget={ledger.remaining} bytes',
                       flush=True)
                 # Crash-safe reservation: a dead controller cannot silently
                 # treat an unmeasured run as zero traffic on the next launch.
                 ledger.begin(unit)
-                ingress, egress = trial(unit, stop_at=cutoff)
+                if args.persistent_rc:
+                    ingress, egress = trial(unit, stop_at=cutoff,
+                                            persistent_rc=True)
+                else:
+                    ingress, egress = trial(unit, stop_at=cutoff)
                 ledger.complete(ingress, egress)
                 print(ledger.summary(), flush=True)
                 if ingress + egress == 0:
