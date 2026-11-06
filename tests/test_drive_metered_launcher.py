@@ -124,6 +124,17 @@ class MeteredLauncherTests(unittest.TestCase):
         auth.assert_not_called()
         self.assertIn('MANUAL SERVICE: not-found', out.getvalue())
 
+    def test_read_only_doctor_failure_stops_automatic_install_chain(self):
+        with (patch.object(launcher.os, 'geteuid', return_value=1000),
+              patch.object(launcher.polkit, 'doctor', return_value=False),
+              patch.object(launcher, 'service_state',
+                           return_value={'LoadState': 'not-found'}),
+              patch.object(launcher.polkit, 'authenticate_installer') as auth,
+              patch('sys.argv', ['metered', 'doctor']),
+              contextlib.redirect_stdout(io.StringIO())):
+            self.assertEqual(launcher.main(), 2)
+        auth.assert_not_called()
+
     def test_installer_preflight_failure_never_requests_password(self):
         with (patch.object(launcher.os, 'geteuid', return_value=1000),
               patch.object(launcher.polkit, 'doctor', return_value=False),
