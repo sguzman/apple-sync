@@ -31,6 +31,34 @@ def process_start_time(path: Path = Path('/proc/self/stat')) -> int:
     return int(words[19])
 
 
+def doctor() -> bool:
+    """Read-only diagnostics: never initiate authentication or modify units."""
+    tty = os.isatty(0)
+    pkexec = Path('/usr/bin/pkexec').is_file()
+    agent = Path('/usr/bin/pkttyagent').is_file()
+    print(f'POLKIT PREFLIGHT: terminal={"yes" if tty else "no"}, '
+          f'pkexec={"present" if pkexec else "missing"}, '
+          f'pkttyagent={"present" if agent else "missing"}',
+          flush=True)
+    try:
+        package = subprocess.run(
+            ['/usr/bin/pacman', '-Q', 'polkit'],
+            capture_output=True, text=True, timeout=5, check=False)
+    except (OSError, subprocess.SubprocessError):
+        package = None
+    if package is not None and package.returncode == 0:
+        version = package.stdout.strip()
+        if version.startswith('polkit ') and len(version) < 90:
+            print('POLKIT PACKAGE: ' + version, flush=True)
+    if not (tty and pkexec and agent):
+        print('POLKIT PREFLIGHT: one-time installation not ready; '
+              'no authorization requested', flush=True)
+        return False
+    print('POLKIT PREFLIGHT: basic tools available; '
+          'authentication not attempted', flush=True)
+    return True
+
+
 def authenticate_installer(installer: Path, *, seconds: float = 6) -> int:
     """Make exactly one authorized request, with no internal pkexec agent.
 
