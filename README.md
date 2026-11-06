@@ -445,7 +445,20 @@ One-time setup (normal local desktop account):
 
     cd /home/sguzman/Code/Sync/apple-sync
     python3 -m unittest discover -s tests -q
+    python3 scripts/drive_metered.py doctor
     python3 scripts/drive_metered.py install
+
+`doctor` reads only the terminal environment, installed Polkit tools,
+package version and manual service status; it never requests a password
+or starts a network job. Installation first runs the same preflight.
+On desktops without a registered graphical agent, the launcher registers
+a separate unprivileged `pkttyagent` for its current session, then invokes
+`pkexec --disable-internal-agent` **exactly once**. This avoids the
+known Polkit 127 regression where pkexec's internal terminal agent can
+report `AUTHENTICATION FAILED` even after a valid password. If an
+existing graphical agent is registered, the fallback agent leaves it
+alone and the request uses that existing agent. Neither path changes
+Polkit service settings or lowers authentication requirements.
 
 This requests **one-time Polkit administrator authorization** through
 pkexec. The authorization is necessary because systemd IPAccounting is
