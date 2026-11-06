@@ -34,8 +34,11 @@ MAX_BYTES = 10_000_000
 # Stop before 10 MB to leave room for polling delay. Not a guaranteed cap.
 STOP_BYTES = 8_000_000
 POLL_SECONDS = 0.25
-PROPS = ('ActiveState', 'SubState', 'IPAccounting',
-         'IPIngressBytes', 'IPEgressBytes')
+IDLE_WAIT_SECONDS = 12 * 60
+IDLE_STABLE_SECONDS = 5
+IDLE_POLL_SECONDS = 5
+PROPS = ('ActiveState', 'SubState', 'ExecMainStatus', 'Result',
+         'IPAccounting', 'IPIngressBytes', 'IPEgressBytes')
 BUSY_UNITS = (
     'google-drive-rclone.service',
     'apple-sync-photos.service',
