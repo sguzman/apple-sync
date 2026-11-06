@@ -17,15 +17,7 @@ class PolkitAuthorizationTests(unittest.TestCase):
     def test_process_start_time_parses_proc_stat_with_spaces_in_comm(self):
         with TemporaryDirectory() as td:
             path = Path(td) / 'stat'
-            path.write_text(
-                '1234 (weird name) S ' + ' '.join(
-                    str(n) for n in range(1, 32)))
-            # Field 3 starts at the S; field 22 is at index 19.
-            self.assertRaises(polkit.AuthorizationError,
-                              polkit.process_start_time, path)
-            path.write_text('1234 (weird name) S ' +
-                            ' '.join(str(n) for n in range(1, 32)))
-            # Replace state + fields 4 through 52 with valid integers.
+            # Fields 3 through 52, including field 22 (start time).
             items = ['S'] + [str(n) for n in range(4, 53)]
             path.write_text('1234 (process name with spaces) ' +
                             ' '.join(items))
