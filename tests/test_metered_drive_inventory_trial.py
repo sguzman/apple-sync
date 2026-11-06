@@ -401,6 +401,33 @@ class MeteredDriveTrialTests(unittest.TestCase):
         gate.assert_called_once()
         trial.assert_not_called()
 
+    def test_immediate_worker_exit_status_is_reported(self):
+        sample = values(0, 0, state='failed', substate='failed')
+        sample.update({'ExecMainStatus': '3', 'Result': 'exit-code'})
+        output = io.StringIO()
+        with (patch.object(metered, 'start'),
+              patch.object(metered, 'props', return_value=sample),
+              patch.object(metered, 'stop'),
+              patch.object(metered, 'report_trial_service_log'),
+              contextlib.redirect_stdout(output)):
+            metered.trial('trial.service')
+        self.assertIn('TRIAL_WORKER_EXIT_STATUS: 3', output.getvalue())
+        self.assertIn('TRIAL_WORKER_UNIT_RESULT: exit-code', output.getvalue())
+
+    def test_short_lived_worker_journal_synced_before_read(self):
+        calls = []
+        def fake_run(command, **kwargs):
+            calls.append(command)
+            return subprocess.CompletedProcess(
+                command, 0, 'TRIAL_BLOCKED: OTHER_BACKUP_ACTIVE unit\n', '')
+        output = io.StringIO()
+        with (patch.object(metered, 'run', side_effect=fake_run),
+              contextlib.redirect_stdout(output)):
+            metered.report_trial_service_log('trial.service')
+        self.assertEqual(calls[0], ['journalctl', '--sync'])
+        self.assertIn('trial.service', calls[1])
+        self.assertIn('TRIAL_BLOCKED: OTHER_BACKUP_ACTIVE', output.getvalue())
+
     def test_user_timer_active_is_a_hard_blocker(self):
         class FakeUser:
             pw_uid = 1000
