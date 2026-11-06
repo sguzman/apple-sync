@@ -138,7 +138,7 @@ def monitor() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('install', 'run', 'status'))
+    parser.add_argument('action', choices=('install', 'run', 'status', 'doctor'))
     parser.add_argument('--detach', action='store_true',
                         help='start and exit without monitoring')
     args = parser.parse_args()
@@ -146,7 +146,15 @@ def main() -> int:
         print('RUN_THIS_LAUNCHER_AS_NORMAL_USER', file=sys.stderr)
         return 2
     try:
+        if args.action == 'doctor':
+            polkit.doctor()
+            state = service_state()
+            print('MANUAL SERVICE: ' +
+                  state.get('LoadState', 'unknown'), flush=True)
+            return 0
         if args.action == 'install':
+            if not polkit.doctor():
+                raise LauncherError('POLKIT_PREFLIGHT_FAILED')
             print('One-time administrator authorization is required to '
                   'install a root-owned service and restricted Polkit rule.',
                   flush=True)
