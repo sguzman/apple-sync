@@ -147,11 +147,11 @@ def main() -> int:
         return 2
     try:
         if args.action == 'doctor':
-            polkit.doctor()
+            ready = polkit.doctor()
             state = service_state()
             print('MANUAL SERVICE: ' +
                   state.get('LoadState', 'unknown'), flush=True)
-            return 0
+            return 0 if ready else 2
         if args.action == 'install':
             if not polkit.doctor():
                 raise LauncherError('POLKIT_PREFLIGHT_FAILED')
