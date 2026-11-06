@@ -476,18 +476,28 @@ contain nonrecursive, immediate-child metadata paths under exactly the
 requested folder. The code rebases them to the same path format as
 the legacy `lsjson` reader and retains file IDs, sizes and timestamps.
 
-This is a candidate optimization, not an established bandwidth saving.
-It is **off by default**, including for the original unattended user
+Recent metered trials on this workstation have shown lower
+ingress+egress per completed folder than the legacy reader, but individual
+folder complexity and remote reliability still vary. The mode remains
+**off by default**, including for the original unattended user
 timer and all existing tests of the legacy reader. A failed or
-unexpected RC response cannot mark a folder complete. The original
+unexpected RC response cannot mark a folder complete. When the local
+`rclone rc` client exits nonzero, its stderr is drained into at most
+64 KiB of ephemeral memory, then mapped to a fixed privacy-safe
+category (`RC_LISTING_DIRECTORY_MISSING`, `RC_LISTING_RATE_LIMITED`,
+`RC_LISTING_SERVER_ERROR`, `RC_LISTING_AUTH_DENIED`, or
+`RC_LISTING_FAILED_UNCLASSIFIED`, etc). Raw errors, remote paths,
+filenames and authentication secrets are **never printed or saved**.
+The walker does not skip missing folders or retry ambiguous failures:
+an error leaves the current folder pending for investigation. The original
 archive lock, backup-activity checks, 90-second metered service and
 cumulative 100 MB soft budget are unchanged. Rclone may still make
 one or more Apple requests per folder, even in this mode.
 
-For an initial measured A/B comparison, run a single opt-in pass
-when other backup services are idle:
+For a short diagnostic or additional measured comparison, run a
+single opt-in pass with a bounded backup-idle wait:
 
-    sudo /usr/bin/python3 scripts/metered_drive_inventory_trial.py --execute --passes 1 --persistent-rc
+    sudo /usr/bin/python3 scripts/metered_drive_inventory_trial.py --execute --passes 1 --persistent-rc --wait-idle
     python3 scripts/drive_inventory.py
 
 Compare the `MEASURED IP INGRESS` and `MEASURED IP EGRESS`
