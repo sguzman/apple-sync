@@ -79,6 +79,7 @@ class RcloneRCReader:
             address = 'unix://' + str(self.socket)
             self.daemon = subprocess.Popen(
                 ['rclone', 'rcd', '--rc-addr', address,
+                 '--rc-no-auth',
                  '--log-level', 'ERROR', '--checkers', '1',
                  '--tpslimit', '2'],
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
