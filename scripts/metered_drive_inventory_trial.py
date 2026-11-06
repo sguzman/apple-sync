@@ -278,7 +278,8 @@ def report_trial_service_log(unit: str) -> None:
 
 
 def trial(unit: str, *, stop_at: int = STOP_BYTES,
-          persistent_rc: bool = False) -> tuple[int, int]:
+          persistent_rc: bool = False,
+          outcome: dict | None = None) -> tuple[int, int]:
     # Launch a same-context user-manager check, then exec the original
     # resumable inventory. This prevents silent zero-byte deferrals.
     args = ['/usr/bin/python3', str(REPO / 'scripts'
@@ -319,6 +320,8 @@ def trial(unit: str, *, stop_at: int = STOP_BYTES,
             status = last_properties.get('ExecMainStatus', '')
             if re.fullmatch(r'[0-9]{1,4}', status):
                 print(f'TRIAL_WORKER_EXIT_STATUS: {status}', flush=True)
+                if outcome is not None:
+                    outcome['worker_exit_status'] = int(status)
             result = last_properties.get('Result', '')
             if result in ('exit-code', 'timeout', 'signal', 'core-dump',
                           'success', 'start-limit-hit'):
@@ -421,13 +424,21 @@ def main() -> int:
                 # Crash-safe reservation: a dead controller cannot silently
                 # treat an unmeasured run as zero traffic on the next launch.
                 ledger.begin(unit)
+                outcome = {}
                 if args.persistent_rc:
                     ingress, egress = trial(unit, stop_at=cutoff,
-                                            persistent_rc=True)
+                                            persistent_rc=True,
+                                            outcome=outcome)
                 else:
-                    ingress, egress = trial(unit, stop_at=cutoff)
+                    ingress, egress = trial(unit, stop_at=cutoff,
+                                            outcome=outcome)
                 ledger.complete(ingress, egress)
                 print(ledger.summary(), flush=True)
+                if outcome.get('worker_exit_status', 0) != 0:
+                    print('METERED INVENTORY: worker failed, measured traffic '
+                          'was committed; no more passes started',
+                          file=sys.stderr, flush=True)
+                    return 2
                 if ingress + egress == 0:
                     print('STOP: no network traffic; worker probably '
                           'deferred or inventory is complete', flush=True)
