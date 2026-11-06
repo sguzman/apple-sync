@@ -467,6 +467,10 @@ session for multiple `operations/list` calls and shuts it down at the
 end of the pass. The server listens only on a Unix socket inside a
 0700 private temporary directory under the existing archive state
 directory; there is **no TCP listener** and no new permanent service.
+Rclone's `operations/list` requires authorization by default, so this
+socket-only daemon uses `--rc-no-auth`. This is safe only while the
+socket remains inaccessible outside its 0700 user-private directory;
+do not expose this daemon through TCP or change its directory permissions.
 Each `rclone rc` invocation is a local socket client. Responses must
 contain nonrecursive, immediate-child metadata paths under exactly the
 requested folder. The code rebases them to the same path format as
