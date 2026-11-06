@@ -111,6 +111,39 @@ class MeteredLauncherTests(unittest.TestCase):
               contextlib.redirect_stderr(io.StringIO())):
             self.assertEqual(launcher.main(), 2)
 
+    def test_polkit_doctor_never_attempts_administrator_authorization(self):
+        out = io.StringIO()
+        with (patch.object(launcher.os, 'geteuid', return_value=1000),
+              patch.object(launcher.polkit, 'doctor', return_value=True),
+              patch.object(launcher, 'service_state',
+                           return_value={'LoadState': 'not-found'}),
+              patch.object(launcher.polkit, 'authenticate_installer') as auth,
+              patch('sys.argv', ['metered', 'doctor']),
+              contextlib.redirect_stdout(out)):
+            self.assertEqual(launcher.main(), 0)
+        auth.assert_not_called()
+        self.assertIn('MANUAL SERVICE: not-found', out.getvalue())
+
+    def test_installer_preflight_failure_never_requests_password(self):
+        with (patch.object(launcher.os, 'geteuid', return_value=1000),
+              patch.object(launcher.polkit, 'doctor', return_value=False),
+              patch.object(launcher.polkit, 'authenticate_installer') as auth,
+              patch('sys.argv', ['metered', 'install']),
+              contextlib.redirect_stdout(io.StringIO()),
+              contextlib.redirect_stderr(io.StringIO())):
+            self.assertEqual(launcher.main(), 2)
+        auth.assert_not_called()
+
+    def test_installer_uses_one_external_agent_auth_attempt(self):
+        with (patch.object(launcher.os, 'geteuid', return_value=1000),
+              patch.object(launcher.polkit, 'doctor', return_value=True),
+              patch.object(launcher.polkit, 'authenticate_installer',
+                           return_value=0) as auth,
+              patch('sys.argv', ['metered', 'install']),
+              contextlib.redirect_stdout(io.StringIO())):
+            self.assertEqual(launcher.main(), 0)
+        auth.assert_called_once_with(launcher.INSTALLER)
+
     def test_start_refuses_missing_unit(self):
         with (patch.object(launcher, 'service_state',
                            return_value={'LoadState': 'not-found'}),
