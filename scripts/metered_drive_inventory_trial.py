@@ -281,12 +281,14 @@ def trial(unit: str, *, stop_at: int = STOP_BYTES,
         args.append('--persistent-rc')
     largest_ingress = largest_egress = 0
     reason = 'TIME_LIMIT'
+    last_properties = {}
     began = time.monotonic()
     try:
         start(unit, args, with_user=True,
               runtime_seconds=MAX_WALL_SECONDS + 10)
         while True:
             data = props(unit)
+            last_properties = data
             ingress, egress = accounted_bytes(data)
             largest_ingress = max(largest_ingress, ingress)
             largest_egress = max(largest_egress, egress)
@@ -307,6 +309,14 @@ def trial(unit: str, *, stop_at: int = STOP_BYTES,
         # Stop the unit, and take a last sample if possible; counters may
         # vanish after the system service is unloaded.
         print(f'Trial end reason: {reason}', flush=True)
+        if reason in ('WORKER_FINISHED', 'WORKER_NOT_ACTIVE'):
+            status = last_properties.get('ExecMainStatus', '')
+            if re.fullmatch(r'[0-9]{1,4}', status):
+                print(f'TRIAL_WORKER_EXIT_STATUS: {status}', flush=True)
+            result = last_properties.get('Result', '')
+            if result in ('exit-code', 'timeout', 'signal', 'core-dump',
+                          'success', 'start-limit-hit'):
+                print(f'TRIAL_WORKER_UNIT_RESULT: {result}', flush=True)
     finally:
         # Stop the entire service cgroup FIRST. Do not keep Apple network
         # traffic alive while collecting a journal or querying counters.
