@@ -258,6 +258,12 @@ def worker_entry(*, persistent_rc: bool = False) -> int:
 
 def report_trial_service_log(unit: str) -> None:
     """Relay only sanitized worker status; never print private filenames."""
+    # Short-lived failed workers can otherwise be queried before journald
+    # has written their final status to the journal.
+    try:
+        run(['journalctl', '--sync'], timeout=8, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
     result = run(
         ['journalctl', '--system', '-u', unit, '-o', 'cat',
          '--no-pager', '-n', '30'],
