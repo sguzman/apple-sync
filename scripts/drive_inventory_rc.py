@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 import selectors
 import stat
@@ -25,6 +26,7 @@ import diagnose_drive_downloads as diagnosis
 SOCKET_NAME = 'rclone.sock'
 STARTUP_SECONDS = 12
 MAX_FOLDER_OUTPUT_BYTES = 8 * 1024 * 1024
+MAX_ERROR_OUTPUT_BYTES = 64 * 1024
 
 
 class RcloneRCError(Exception):
@@ -56,6 +58,37 @@ def normalize_folder_listing(folder: str, response: object) -> list[dict]:
             raise RcloneRCError('RC_NONIMMEDIATE_OR_UNSAFE_PATH')
         output.append({**item, 'Path': relpath})
     return output
+
+
+def classify_rc_failure(stdout: bytes, stderr: bytes, exit_code: int) -> str:
+    """Return fixed, privacy-safe diagnostics; never emit rclone error text.
+
+    rclone rc can put server error JSON (including full remote paths and
+    request inputs) on stderr. We inspect bounded captured bytes in memory
+    and disclose only a small allowlist of categories.
+    """
+    raw = (stdout + b'\n' + stderr).lower()
+    # Prefer the server's structured status when supplied.
+    matches = re.findall(rb'"status"\s*:\s*([1-5][0-9]{2})', raw)
+    statuses = {int(value) for value in matches}
+    if 429 in statuses or b'too many requests' in raw or b'rate limit' in raw:
+        return 'RC_LISTING_RATE_LIMITED'
+    if 401 in statuses or 403 in statuses or b'unauthorized' in raw:
+        return 'RC_LISTING_AUTH_DENIED'
+    if b'directory not found' in raw or b'dir not found' in raw:
+        return 'RC_LISTING_DIRECTORY_MISSING'
+    if 404 in statuses:
+        return 'RC_LISTING_NOT_FOUND'
+    if (408 in statuses or b'context deadline exceeded' in raw
+            or b'timed out' in raw or b'timeout' in raw):
+        return 'RC_LISTING_REMOTE_TIMEOUT'
+    if statuses & {500, 502, 503, 504} or b'internal server error' in raw:
+        return 'RC_LISTING_SERVER_ERROR'
+    if statuses & {400, 422}:
+        return 'RC_LISTING_BAD_REQUEST'
+    if exit_code < 0:
+        return 'RC_LISTING_CLIENT_TERMINATED'
+    return 'RC_LISTING_FAILED_UNCLASSIFIED'
 
 
 class RcloneRCReader:
@@ -132,16 +165,18 @@ class RcloneRCReader:
                '--log-level', 'ERROR']
         process = None
         received = bytearray()
+        diagnostic = bytearray()
         deadline = time.monotonic() + timeout
         try:
             try:
                 process = subprocess.Popen(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             except OSError as exc:
                 raise RcloneRCError('RC_CLIENT_START_FAILED') from exc
             with selectors.DefaultSelector() as selector:
                 selector.register(process.stdout, selectors.EVENT_READ)
-                while True:
+                selector.register(process.stderr, selectors.EVENT_READ)
+                while selector.get_map():
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise RcloneRCError('RC_FOLDER_TIMEOUT')
@@ -149,20 +184,26 @@ class RcloneRCReader:
                         raise RcloneRCError('RC_DAEMON_EXITED')
                     if diagnosis.backup_busy():
                         raise RcloneRCDeferred()
-                    if not selector.select(min(5, remaining)):
-                        continue
-                    block = os.read(process.stdout.fileno(), 65536)
-                    if not block:
-                        break
-                    received.extend(block)
-                    if len(received) > self.max_output:
-                        raise RcloneRCError('RC_RESPONSE_TOO_LARGE')
+                    for key, _mask in selector.select(min(5, remaining)):
+                        block = os.read(key.fileobj.fileno(), 65536)
+                        if not block:
+                            selector.unregister(key.fileobj)
+                            continue
+                        if key.fileobj is process.stdout:
+                            received.extend(block)
+                            if len(received) > self.max_output:
+                                raise RcloneRCError('RC_RESPONSE_TOO_LARGE')
+                        else:
+                            diagnostic.extend(block)
+                            if len(diagnostic) > MAX_ERROR_OUTPUT_BYTES:
+                                raise RcloneRCError('RC_DIAGNOSTIC_TOO_LARGE')
             try:
                 exit_code = process.wait(timeout=max(0.1, deadline - time.monotonic()))
             except subprocess.TimeoutExpired as exc:
                 raise RcloneRCError('RC_FOLDER_TIMEOUT') from exc
             if exit_code:
-                raise RcloneRCError('RC_LISTING_FAILED')
+                raise RcloneRCError(classify_rc_failure(
+                    bytes(received), bytes(diagnostic), exit_code))
             try:
                 parsed = json.loads(received)
             except (ValueError, UnicodeError) as exc:
@@ -174,3 +215,4 @@ class RcloneRCReader:
                     process.kill()
                     process.wait()
                 process.stdout.close()
+                process.stderr.close()
