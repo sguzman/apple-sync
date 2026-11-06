@@ -16,6 +16,8 @@ import subprocess
 import sys
 import time
 
+import polkit_authorization as polkit
+
 UNIT = 'apple-sync-drive-metered-manual.service'
 STATUS = Path('/var/lib/apple-sync-drive-metered-status.json')
 INSTALLER = Path('/home/sguzman/Code/Sync/apple-sync/scripts/install_metered_launcher.py')
@@ -148,9 +150,8 @@ def main() -> int:
             print('One-time administrator authorization is required to '
                   'install a root-owned service and restricted Polkit rule.',
                   flush=True)
-            result = subprocess.run(
-                ['pkexec', '/usr/bin/python3', str(INSTALLER)], check=False)
-            return result.returncode
+            result = polkit.authenticate_installer(INSTALLER)
+            return result
         if args.action == 'status':
             show_state()
             return 0
@@ -162,9 +163,12 @@ def main() -> int:
         print('Viewer detached; system service continues under its budget.',
               flush=True)
         return 0
-    except (LauncherError, OSError, subprocess.SubprocessError) as exc:
+    except (LauncherError, polkit.AuthorizationError, OSError,
+            subprocess.SubprocessError) as exc:
         print('METERED LAUNCHER: ' +
-              (str(exc) if isinstance(exc, LauncherError) else 'SYSTEM_ERROR'),
+              (str(exc) if isinstance(exc, (LauncherError,
+                                            polkit.AuthorizationError))
+               else 'SYSTEM_ERROR'),
               file=sys.stderr, flush=True)
         return 2
 
