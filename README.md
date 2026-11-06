@@ -517,6 +517,28 @@ The pass count is explicit and bounded to 1–24. The controller stops early
 when a pass has no network traffic (e.g. another backup is busy or the
 inventory is complete), or when the cumulative budget is exhausted.
 
+To reduce manual retries caused by overlapping backup timers, explicitly
+request a bounded **stable idle wait** before each pass:
+
+    sudo /usr/bin/python3 scripts/metered_drive_inventory_trial.py --execute --passes 8 --persistent-rc --wait-idle
+
+The controller checks the named backup units through the ordinary user's
+systemd manager. They must all be inactive or failed for five continuous
+seconds. It can wait up to twelve minutes **total per invocation**, not
+twelve minutes per pass, and it never stops, restarts, disables or reschedules
+another backup job. If no stable idle window is found, the command exits
+without beginning a new metered pass or consuming a ledger entry. If another
+backup starts after the idle check, the original worker still defers and
+the controller stops on zero traffic; the gate reduces but cannot eliminate
+timing races. A failed backup unit is not considered active, but remains a
+separate issue to investigate.
+
+When a short-lived worker exits, the controller also reports its numeric
+`TRIAL_WORKER_EXIT_STATUS` and any sanitized `TRIAL_BLOCKED` journal
+message it can retrieve. A failed worker is not silently treated as a
+completed inventory, and a failed/unreadable unit state blocks the idle
+wait. The timer remains disabled.
+
 The ledger at `/var/lib/apple-sync-drive-metered/budget-v1.json` is
 root-owned and mode 0600; its directory is mode 0700. An exclusive lock
 prevents multiple controllers. Immediately *before* starting each metered
