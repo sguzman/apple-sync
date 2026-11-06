@@ -157,6 +157,54 @@ def guard_setup() -> None:
         raise TrialError('CANNOT_VALIDATE_USER_TIMER_STATE')
 
 
+def user_unit_state(unit: str) -> str:
+    """Read the user's unit state without altering any services."""
+    user = pwd.getpwnam(USER)
+    command = [
+        'runuser', '-u', USER, '--', 'env',
+        f'XDG_RUNTIME_DIR=/run/user/{user.pw_uid}',
+        f'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{user.pw_uid}/bus',
+        'systemctl', '--user', 'show', unit,
+        '--property=ActiveState', '--value', '--no-pager',
+    ]
+    result = run(command, timeout=8, check=False)
+    state = result.stdout.strip()
+    if result.returncode != 0 or state not in (
+            'inactive', 'failed', 'active', 'activating', 'deactivating'):
+        raise TrialError('USER_MANAGER_STATUS_UNAVAILABLE')
+    return state
+
+
+def wait_for_idle_window(deadline: float) -> bool:
+    """Wait for a stable idle interval, before reserving a metered pass."""
+    idle_since = None
+    announced = None
+    while True:
+        blocked = None
+        for unit in BUSY_UNITS:
+            if user_unit_state(unit) not in ('inactive', 'failed'):
+                blocked = unit
+                break
+        now = time.monotonic()
+        if blocked is None:
+            if idle_since is None:
+                idle_since = now
+            if now - idle_since >= IDLE_STABLE_SECONDS:
+                print('TRIAL_IDLE_WINDOW_READY: backups idle for 5 seconds',
+                      flush=True)
+                return True
+        else:
+            idle_since = None
+            if blocked != announced:
+                print(f'TRIAL_WAITING_FOR_BACKUP: {blocked}', flush=True)
+                announced = blocked
+        if now >= deadline:
+            print('TRIAL_IDLE_WAIT_EXPIRED: no stable idle window; '
+                  'no new inventory pass launched', flush=True)
+            return False
+        time.sleep(min(IDLE_POLL_SECONDS, deadline - now))
+
+
 def preflight(unit: str) -> None:
     print('Accounting preflight: no Apple traffic', flush=True)
     try:
