@@ -428,6 +428,38 @@ class MeteredDriveTrialTests(unittest.TestCase):
         self.assertIn('trial.service', calls[1])
         self.assertIn('TRIAL_BLOCKED: OTHER_BACKUP_ACTIVE', output.getvalue())
 
+    def test_nonzero_worker_status_communicated_after_ledger_commit(self):
+        def failed_trial(unit, *, stop_at, outcome):
+            outcome['worker_exit_status'] = 2
+            return (0, 0)
+        out = io.StringIO()
+        with (patch.object(metered, 'guard_setup'),
+              patch.object(metered, 'BudgetLedger') as budget_ledger,
+              patch.object(metered, 'preflight'),
+              patch.object(metered, 'trial', side_effect=failed_trial),
+              patch.object(metered.os, 'geteuid', return_value=0),
+              patch('sys.argv', ['metered', '--execute']),
+              contextlib.redirect_stdout(out),
+              contextlib.redirect_stderr(io.StringIO())):
+            ledger = budget_ledger.return_value.__enter__.return_value
+            ledger.remaining = metered.CAP_BYTES
+            ledger.summary.return_value = 'status'
+            self.assertEqual(metered.main(), 2)
+            ledger.complete.assert_called_once_with(0, 0)
+
+    def test_trial_exposes_worker_status_without_changing_bytes(self):
+        sample = values(0, 0, state='failed', substate='failed')
+        sample.update({'ExecMainStatus': '2', 'Result': 'exit-code'})
+        outcome = {}
+        with (patch.object(metered, 'start'),
+              patch.object(metered, 'props', return_value=sample),
+              patch.object(metered, 'stop'),
+              patch.object(metered, 'report_trial_service_log'),
+              contextlib.redirect_stdout(io.StringIO())):
+            result = metered.trial('trial.service', outcome=outcome)
+        self.assertEqual(result, (0, 0))
+        self.assertEqual(outcome['worker_exit_status'], 2)
+
     def test_user_timer_active_is_a_hard_blocker(self):
         class FakeUser:
             pw_uid = 1000
