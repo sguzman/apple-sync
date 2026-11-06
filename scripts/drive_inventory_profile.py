@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 import json
-from pathlib import Path
 import statistics
 
 import archive_batch as archive
@@ -29,7 +28,7 @@ def count_folders(progress: dict) -> list[dict]:
         parent = path.rsplit('/', 1)[0] if '/' in path else ''
         values = per_parent[parent]
         values['records'] += 1
-        values['dirs'] += int(item['IsDir'] is True)
+        values['dirs'] += int(item.get('IsDir') is True)
         # This is saved JSON representation, NOT remote traffic.
         values['serialized_bytes'] += len(
             json.dumps(item, ensure_ascii=False,
