@@ -41,7 +41,7 @@ class MeteredLauncherTests(unittest.TestCase):
         self.assertNotIn('action.lookup("verb") === "restart"', rule)
 
     def test_installer_source_and_destinations_are_fixed(self):
-        self.assertEqual(installer.SOURCE, ROOT)
+        self.assertEqual(installer.SOURCE, Path('/home/sguzman/Code/Sync/apple-sync'))
         copied = {target.name for _, target in installer.COPIES}
         self.assertEqual(copied, {
             'metered_drive_inventory_trial.py', 'drive_meter_budget.py',
