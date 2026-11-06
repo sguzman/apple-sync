@@ -13,4 +13,4 @@ Nice=10
 StandardOutput=journal
 StandardError=journal
 
-# Intentionally no [Install] section or timer: manual invocation only.
+# Static manual-only unit. Never enabled or scheduled.
