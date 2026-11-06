@@ -197,6 +197,8 @@ class RcloneRCInventoryTests(unittest.TestCase):
                     pass
             def fake_popen(command, **_kw):
                 self.assertEqual(command[:2], ['rclone', 'rcd'])
+                self.assertIn('--rc-no-auth', command)
+                self.assertNotIn('--rc-addr', command[command.index('--rc-addr') + 2:])
                 address = command[command.index('--rc-addr') + 1]
                 self.assertTrue(address.startswith('unix://'))
                 sock_path = Path(address[len('unix://'):])
