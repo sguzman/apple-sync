@@ -66,6 +66,19 @@ def _check(data: object) -> dict:
     return data
 
 
+def public_view(data: dict) -> dict:
+    """Strict aggregate-only projection of the private, validated ledger."""
+    data = _check(data)
+    return {'version': VERSION, 'cap_bytes': CAP_BYTES,
+            'ingress_bytes': data['ingress_bytes'],
+            'egress_bytes': data['egress_bytes'],
+            'total_bytes': data['ingress_bytes'] + data['egress_bytes'],
+            'remaining_bytes': max(
+                0, CAP_BYTES - data['ingress_bytes'] - data['egress_bytes']),
+            'passes': data['passes'], 'pending': data['pending'] is not None,
+            'updated_at': int(time.time())}
+
+
 def publish_public_status(data: dict, *, destination: Path = PUBLIC_STATUS) -> None:
     """Publish only aggregate counters in an atomic, unprivileged-readable file.
 
@@ -73,7 +86,7 @@ def publish_public_status(data: dict, *, destination: Path = PUBLIC_STATUS) -> N
     names, paths, credentials, or raw logs appear in the public projection.
     The fixed /var/lib parent must be root-owned and not writable by others.
     """
-    data = _check(data)
+    view = public_view(data)
     parent = destination.parent
     info = parent.lstat()
     if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or
@@ -84,14 +97,6 @@ def publish_public_status(data: dict, *, destination: Path = PUBLIC_STATUS) -> N
         existing = destination.lstat()
         if not (stat.S_ISREG(existing.st_mode) or stat.S_ISLNK(existing.st_mode)):
             raise BudgetError('UNSAFE_PUBLIC_METER_DESTINATION')
-    view = {'version': VERSION, 'cap_bytes': CAP_BYTES,
-            'ingress_bytes': data['ingress_bytes'],
-            'egress_bytes': data['egress_bytes'],
-            'total_bytes': data['ingress_bytes'] + data['egress_bytes'],
-            'remaining_bytes': max(
-                0, CAP_BYTES - data['ingress_bytes'] - data['egress_bytes']),
-            'passes': data['passes'], 'pending': data['pending'] is not None,
-            'updated_at': int(time.time())}
     fd, temporary = tempfile.mkstemp(
         prefix='.apple-sync-meter-status-', dir=parent)
     try:
