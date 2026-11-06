@@ -497,6 +497,30 @@ not loosen the exact Polkit rule to allow editing/enabling other services
 or executing user-writable code as root. A local Polkit authentication
 agent must be available for the one-time setup.
 
+### Offline checkpoint workload comparison (no network)
+
+Before spending more bandwidth after a traffic-per-folder increase, compare
+the already saved inventory records for previous metered batch boundaries:
+
+    python3 scripts/drive_inventory_profile.py --cuts 1236 1409 1599
+
+This command loads only the private, resumable checkpoint. It **does not
+contact Apple, invoke rclone, download content, alter the checkpoint, or
+modify the budget**. It outputs only anonymous aggregate counts and
+distributions for folders completed between consecutive boundaries:
+records per folder, empty folders, folder depth, subdirectories and
+serialized record JSON bytes. It does not print folder names, filenames,
+file IDs or paths. The `local_record_json_bytes` figure describes the
+**locally stored metadata** and must **not** be mistaken for systemd's
+measured network ingress/egress. Combine its record-density comparison
+with measured batch totals to investigate traffic changes; correlation
+does not establish the cause of additional Apple network requests.
+
+The `--cuts` values are historical completed-folder totals, not absolute
+remote offsets. They must be strictly increasing and within the current
+saved checkpoint. For future comparisons, use the new completed-folder
+counts from successive normal-user `status` outputs.
+
 ## Metered, cumulative-budget Drive inventory (administrative opt-in)
 
 The old hourly **user** inventory service has no IP-accounting history;
