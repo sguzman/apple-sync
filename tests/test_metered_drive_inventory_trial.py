@@ -344,6 +344,34 @@ class MeteredDriveTrialTests(unittest.TestCase):
             self.assertEqual(metered.main(), 0)
         entry.assert_called_once_with(persistent_rc=True)
 
+    def test_idle_gate_waits_for_stable_interval(self):
+        clock = [0.0]
+        def state(unit):
+            if unit == 'apple-sync-photos-progress.service' and clock[0] < 10:
+                return 'activating'
+            return 'inactive'
+        output = io.StringIO()
+        with (patch.object(metered, 'user_unit_state', side_effect=state),
+              patch.object(metered.time, 'monotonic',
+                           side_effect=lambda: clock[0]),
+              patch.object(metered.time, 'sleep',
+                           side_effect=lambda n: clock.__setitem__(0, clock[0] + n)),
+              contextlib.redirect_stdout(output)):
+            self.assertTrue(metered.wait_for_idle_window(30))
+        self.assertEqual(clock[0], 15.0)
+        self.assertIn('TRIAL_WAITING_FOR_BACKUP', output.getvalue())
+
+    def test_idle_wait_expiration(self):
+        clock = [0.0]
+        with (patch.object(metered, 'user_unit_state', return_value='active'),
+              patch.object(metered.time, 'monotonic',
+                           side_effect=lambda: clock[0]),
+              patch.object(metered.time, 'sleep',
+                           side_effect=lambda n: clock.__setitem__(0, clock[0] + n)),
+              contextlib.redirect_stdout(io.StringIO())):
+            self.assertFalse(metered.wait_for_idle_window(8))
+        self.assertEqual(clock[0], 8.0)
+
     def test_user_timer_active_is_a_hard_blocker(self):
         class FakeUser:
             pw_uid = 1000
