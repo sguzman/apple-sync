@@ -25,6 +25,29 @@ class MeterBudgetTests(unittest.TestCase):
                 self.assertEqual(stat.S_IMODE(
                     (root / budget.LOCK_NAME).stat().st_mode), 0o600)
 
+    def test_public_projection_contains_aggregates_not_private_unit(self):
+        data = budget._initial()
+        data['ingress_bytes'] = 123
+        data['egress_bytes'] = 456
+        data['passes'] = 7
+        data['pending'] = {
+            'unit': 'apple-sync-drive-metered-123-0.service',
+            'started': 1780000000,
+        }
+        view = budget.public_view(data)
+        self.assertEqual(view['total_bytes'], 579)
+        self.assertEqual(view['remaining_bytes'], budget.CAP_BYTES - 579)
+        self.assertTrue(view['pending'])
+        self.assertEqual(view['passes'], 7)
+        self.assertEqual(set(view), {
+            'version', 'cap_bytes', 'ingress_bytes', 'egress_bytes',
+            'total_bytes', 'remaining_bytes', 'passes', 'pending', 'updated_at',
+        })
+        self.assertNotIn('unit', view)
+        self.assertNotIn('started', view)
+        self.assertNotIn('apple-sync-drive-metered-123-0.service',
+                         json.dumps(view))
+
     def test_multiple_passes_persist_across_process_boundaries(self):
         with TemporaryDirectory() as directory:
             root = Path(directory) / 'meter'
