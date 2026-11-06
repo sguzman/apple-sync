@@ -46,13 +46,19 @@ class PolkitAuthorizationTests(unittest.TestCase):
 
     def test_doctor_refuses_missing_agent_without_prompt(self):
         output = io.StringIO()
+        result = subprocess.CompletedProcess([], 0, 'polkit 127-2\n', '')
         with (patch.object(polkit.os, 'isatty', return_value=True),
               patch.object(Path, 'is_file',
                            side_effect=[True, False]),
+              patch.object(polkit.subprocess, 'run',
+                           return_value=result) as read_version,
               patch.object(polkit.subprocess, 'Popen') as auth,
               contextlib.redirect_stdout(output)):
             self.assertFalse(polkit.doctor())
         auth.assert_not_called()
+        read_version.assert_called_once_with(
+            ['/usr/bin/pacman', '-Q', 'polkit'],
+            capture_output=True, text=True, timeout=5, check=False)
         self.assertIn('installation not ready', output.getvalue())
 
     def test_no_interactive_terminal_refuses_before_any_authentication(self):
