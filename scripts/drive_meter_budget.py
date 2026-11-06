@@ -13,12 +13,14 @@ import json
 import os
 from pathlib import Path
 import stat
+import sys
 import tempfile
 import time
 
 ROOT = Path('/var/lib/apple-sync-drive-metered')
 STATE_NAME = 'budget-v1.json'
 LOCK_NAME = 'budget.lock'
+PUBLIC_STATUS = Path('/var/lib/apple-sync-drive-metered-status.json')
 CAP_BYTES = 100_000_000  # 100 MB measured ingress + egress, from ledger creation
 RESERVE_BYTES = 2_000_000  # sampled controller cutoff margin, not strict
 VERSION = 1
@@ -62,6 +64,52 @@ def _check(data: object) -> dict:
         and _valid(pending['started'])):
         raise BudgetError('INVALID_METER_BUDGET_PENDING')
     return data
+
+
+def publish_public_status(data: dict, *, destination: Path = PUBLIC_STATUS) -> None:
+    """Publish only aggregate counters in an atomic, unprivileged-readable file.
+
+    The private ledger stays mode 0600 in its own 0700 directory. No unit
+    names, paths, credentials, or raw logs appear in the public projection.
+    The fixed /var/lib parent must be root-owned and not writable by others.
+    """
+    data = _check(data)
+    parent = destination.parent
+    info = parent.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or
+            info.st_mode & 0o022 or os.geteuid() != 0):
+        raise BudgetError('UNSAFE_PUBLIC_METER_PARENT')
+    # os.replace() replaces a symlink rather than following it.
+    if destination.exists() or destination.is_symlink():
+        existing = destination.lstat()
+        if not (stat.S_ISREG(existing.st_mode) or stat.S_ISLNK(existing.st_mode)):
+            raise BudgetError('UNSAFE_PUBLIC_METER_DESTINATION')
+    view = {'version': VERSION, 'cap_bytes': CAP_BYTES,
+            'ingress_bytes': data['ingress_bytes'],
+            'egress_bytes': data['egress_bytes'],
+            'total_bytes': data['ingress_bytes'] + data['egress_bytes'],
+            'remaining_bytes': max(
+                0, CAP_BYTES - data['ingress_bytes'] - data['egress_bytes']),
+            'passes': data['passes'], 'pending': data['pending'] is not None,
+            'updated_at': int(time.time())}
+    fd, temporary = tempfile.mkstemp(
+        prefix='.apple-sync-meter-status-', dir=parent)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as output:
+            os.fchmod(output.fileno(), 0o644)
+            json.dump(view, output, sort_keys=True)
+            output.write('\n')
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, destination)
+        dirfd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(dirfd)
+        finally:
+            os.close(dirfd)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 class BudgetLedger:
@@ -129,6 +177,14 @@ class BudgetLedger:
         finally:
             if os.path.exists(temp):
                 os.unlink(temp)
+        # Only the production root-owned ledger can publish public counters.
+        # Public status is observational: failure never alters ledger safety.
+        if self.root == ROOT and os.geteuid() == 0:
+            try:
+                publish_public_status(self.data)
+            except (BudgetError, OSError):
+                print('METER_PUBLIC_STATUS_UNAVAILABLE', file=sys.stderr,
+                      flush=True)
 
     @property
     def used(self) -> int:
