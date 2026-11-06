@@ -30,6 +30,31 @@ class PolkitAuthorizationTests(unittest.TestCase):
             with self.assertRaises(polkit.AuthorizationError):
                 polkit.process_start_time(path)
 
+    def test_doctor_is_read_only_and_prints_version(self):
+        output = io.StringIO()
+        with (patch.object(polkit.os, 'isatty', return_value=True),
+              patch.object(Path, 'is_file', return_value=True),
+              patch.object(polkit.subprocess, 'run',
+                           return_value=subprocess.CompletedProcess(
+                               [], 0, 'polkit 127-2\\n', '')) as run,
+              patch.object(polkit.subprocess, 'Popen') as auth,
+              contextlib.redirect_stdout(output)):
+            self.assertTrue(polkit.doctor())
+        run.assert_called_once()
+        auth.assert_not_called()
+        self.assertIn('POLKIT PACKAGE: polkit 127-2', output.getvalue())
+
+    def test_doctor_refuses_missing_agent_without_prompt(self):
+        output = io.StringIO()
+        with (patch.object(polkit.os, 'isatty', return_value=True),
+              patch.object(Path, 'is_file',
+                           side_effect=[True, False]),
+              patch.object(polkit.subprocess, 'Popen') as auth,
+              contextlib.redirect_stdout(output)):
+            self.assertFalse(polkit.doctor())
+        auth.assert_not_called()
+        self.assertIn('installation not ready', output.getvalue())
+
     def test_no_interactive_terminal_refuses_before_any_authentication(self):
         with (patch.object(polkit.os, 'isatty', return_value=False),
               patch.object(polkit.subprocess, 'Popen') as agent,
