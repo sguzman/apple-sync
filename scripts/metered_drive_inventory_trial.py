@@ -349,6 +349,9 @@ def main() -> int:
     parser.add_argument('--persistent-rc', action='store_true',
                         help='opt-in experimental persistent rclone listing '
                              'backend; use a short measured comparison first')
+    parser.add_argument('--wait-idle', action='store_true',
+                        help='before each pass wait up to 12 minutes total for '
+                             'backups to stay idle for five seconds')
     args = parser.parse_args()
     if args.worker_entry:
         return worker_entry(persistent_rc=args.persistent_rc)
@@ -356,6 +359,8 @@ def main() -> int:
         parser.error('--passes must be between 1 and 24')
     if args.status and args.execute:
         parser.error('--status and --execute are mutually exclusive')
+    if args.wait_idle and not args.execute:
+        parser.error('--wait-idle requires --execute')
     if not args.execute and not args.status:
         print('PREVIEW: 90s metered passes; per-pass 10MB advisory budget, '
               '8MB sampled cutoff, cumulative 100MB measured cap '
@@ -380,6 +385,7 @@ def main() -> int:
                 return 0
 
             ledger.check_ready()
+            idle_deadline = time.monotonic() + IDLE_WAIT_SECONDS
             preflight('apple-sync-ipaccounting-check-' + nonce + '.service')
             for index in range(args.passes):
                 if ledger.remaining <= RESERVE_BYTES:
@@ -387,6 +393,8 @@ def main() -> int:
                           flush=True)
                     break
                 ledger.check_ready()
+                if args.wait_idle and not wait_for_idle_window(idle_deadline):
+                    break
                 cutoff = min(STOP_BYTES, ledger.remaining - RESERVE_BYTES)
                 unit = f'apple-sync-drive-metered-{nonce}-{index}.service'
                 print(f'METERED PASS {index + 1}/{args.passes}: '
