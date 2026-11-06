@@ -11,7 +11,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import selectors
-import shutil
 import subprocess
 import time
 
@@ -41,7 +40,8 @@ def authenticate_installer(installer: Path, *, seconds: float = 6) -> int:
     """
     if not os.isatty(0):
         raise AuthorizationError('INTERACTIVE_TERMINAL_REQUIRED')
-    if not shutil.which('pkexec') or not shutil.which('pkttyagent'):
+    if not (Path('/usr/bin/pkexec').is_file() and
+            Path('/usr/bin/pkttyagent').is_file()):
         raise AuthorizationError('POLKIT_TOOLS_UNAVAILABLE')
     if not installer.is_file():
         raise AuthorizationError('INSTALLER_SOURCE_MISSING')
@@ -51,7 +51,7 @@ def authenticate_installer(installer: Path, *, seconds: float = 6) -> int:
         process_id = str(os.getpid()) + ',' + str(process_start_time())
         try:
             agent = subprocess.Popen(
-                ['pkttyagent', '--process', process_id,
+                ['/usr/bin/pkttyagent', '--process', process_id,
                  '--notify-fd', str(write_fd), '--fallback'],
                 pass_fds=(write_fd,))
         finally:
@@ -71,7 +71,7 @@ def authenticate_installer(installer: Path, *, seconds: float = 6) -> int:
         # No internal terminal fallback, avoiding the Polkit 127 regression.
         # One authorization request only; never automatically try again.
         result = subprocess.run(
-            ['pkexec', '--disable-internal-agent',
+            ['/usr/bin/pkexec', '--disable-internal-agent',
              '/usr/bin/python3', str(installer)],
             check=False)
         if result.returncode in (126, 127):
