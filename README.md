@@ -439,6 +439,51 @@ metadata requests before it completes. It is **not** an incremental or
 change-token-backed future inventory refresh. Continue treating Drive
 download automation as blocked until explicitly validated.
 
+## Normal-user manually triggered metered inventory
+
+One-time setup (normal local desktop account):
+
+    cd /home/sguzman/Code/Sync/apple-sync
+    python3 -m unittest discover -s tests -q
+    python3 scripts/drive_metered.py install
+
+This requests **one-time Polkit administrator authorization** through
+pkexec. The authorization is necessary because systemd IPAccounting is
+available for system services, not ordinary per-user services. The installer
+copies the privileged controller and budget ledger module into a root-owned
+/usr/local/libexec/apple-sync-drive-metered/ directory and installs a
+**static, manual-only** system unit and an exact **start-only** Polkit rule
+for active local user sguzman. It never enables or starts any service or
+timer, does not grant general administrative permissions, and leaves the
+existing inventory checkpoint and 100 MB ledger untouched.
+
+After installation, use these commands **without sudo or repeat password
+prompts**:
+
+    python3 scripts/drive_metered.py run
+    python3 scripts/drive_metered.py status
+
+The run command launches the installed root-owned controller as a fixed
+batch of up to eight 90-second metered passes with persistent RC and
+bounded backup-idle waiting. The viewer shows aggregate progress and
+current status; Ctrl+C detaches the viewer but leaves the metered service
+running. Add --detach to run to request a batch and return immediately.
+
+The private 100 MB metering ledger remains root-owned, mode 0600, in its
+0700 directory. For normal-user status, only aggregate ingress/egress,
+total/remaining measured bytes, pass count, and pending flag are published
+atomically to a root-owned mode 0644 file at
+/var/lib/apple-sync-drive-metered-status.json. No file paths, tokens,
+or per-document information are published. This remains a sampled advisory
+budget, not a kernel-enforced hard quota.
+
+Security note: The installed privileged Python modules do not change when
+git pulls update the user-owned repository. Future changes to privileged
+controller code require another explicitly authorized installation. Do
+not loosen the exact Polkit rule to allow editing/enabling other services
+or executing user-writable code as root. A local Polkit authentication
+agent must be available for the one-time setup.
+
 ## Metered, cumulative-budget Drive inventory (administrative opt-in)
 
 The old hourly **user** inventory service has no IP-accounting history;
