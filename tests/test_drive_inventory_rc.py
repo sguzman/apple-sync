@@ -184,6 +184,69 @@ class RcloneRCInventoryTests(unittest.TestCase):
             self.assertEqual(inventory.progress_path(root).read_bytes(),
                              before)
 
+    def test_rc_failure_categories_never_expose_paths(self):
+        raw = (b'Failed to rc: 500 Internal Server Error: '
+               b'{"error":"error in ListJSON: directory not found /Private/'
+               b'Personal Documents","status":500}')
+        reason = rc.classify_rc_failure(b'', raw, 1)
+        self.assertEqual(reason, 'RC_LISTING_DIRECTORY_MISSING')
+        self.assertNotIn('Private', reason)
+        self.assertNotIn('Personal', reason)
+
+    def test_rc_rate_limit_and_auth_categories_are_stable(self):
+        cases = [
+            (b'{"status":429}', 'RC_LISTING_RATE_LIMITED'),
+            (b'HTTP 429 Too Many Requests', 'RC_LISTING_RATE_LIMITED'),
+            (b'{"status":403}', 'RC_LISTING_AUTH_DENIED'),
+            (b'{"status":404}', 'RC_LISTING_NOT_FOUND'),
+            (b'{"status":503}', 'RC_LISTING_SERVER_ERROR'),
+            (b'{"status":400}', 'RC_LISTING_BAD_REQUEST'),
+            (b'context deadline exceeded', 'RC_LISTING_REMOTE_TIMEOUT'),
+            (b'A private folder without known markers',
+             'RC_LISTING_FAILED_UNCLASSIFIED'),
+        ]
+        for data, expected in cases:
+            with self.subTest(expected=expected):
+                self.assertEqual(rc.classify_rc_failure(b'', data, 1), expected)
+
+    def test_failed_rc_client_reports_sanitized_category(self):
+        reader = rc.RcloneRCReader(Path('/ignored'))
+        reader.socket = Path('/tmp/not-used-by-mock.sock')
+        reader.daemon = Mock()
+        reader.daemon.poll.return_value = None
+        real_popen = subprocess.Popen
+        private = 'private-apple-folder-name'
+        script = ("import sys; "
+                  "sys.stderr.write('Failed to rc: 500 Internal Server Error: "
+                  + '{"error":"directory not found ' + private
+                  + '","status":500}' + "'); "
+                  "sys.exit(1)")
+        def fake_popen(_command, **kwargs):
+            return real_popen([sys.executable, '-c', script], **kwargs)
+        with (patch.object(rc.subprocess, 'Popen', side_effect=fake_popen),
+              patch.object(rc.diagnosis, 'backup_busy', return_value=False)):
+            with self.assertRaises(rc.RcloneRCError) as caught:
+                reader('Desktop', timeout=5)
+        self.assertEqual(str(caught.exception), 'RC_LISTING_DIRECTORY_MISSING')
+        self.assertNotIn(private, str(caught.exception))
+
+    def test_rc_stderr_overflow_fails_closed(self):
+        reader = rc.RcloneRCReader(Path('/ignored'))
+        reader.socket = Path('/tmp/not-used-by-mock.sock')
+        reader.daemon = Mock()
+        reader.daemon.poll.return_value = None
+        real_popen = subprocess.Popen
+        def fake_popen(_command, **kwargs):
+            return real_popen(
+                [sys.executable, '-c',
+                 'import sys;sys.stderr.write("x"*80000);sys.exit(1)'],
+                **kwargs)
+        with (patch.object(rc.subprocess, 'Popen', side_effect=fake_popen),
+              patch.object(rc.diagnosis, 'backup_busy', return_value=False),
+              self.assertRaisesRegex(rc.RcloneRCError,
+                                         'RC_DIAGNOSTIC_TOO_LARGE')):
+            reader('Desktop', timeout=5)
+
     def test_private_rc_socket_directory_and_cleanup(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
