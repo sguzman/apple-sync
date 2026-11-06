@@ -372,6 +372,35 @@ class MeteredDriveTrialTests(unittest.TestCase):
             self.assertFalse(metered.wait_for_idle_window(8))
         self.assertEqual(clock[0], 8.0)
 
+    def test_unknown_user_manager_state_fails_closed(self):
+        class FakeUser:
+            pw_uid = 1000
+        result = subprocess.CompletedProcess([], 1, '', '')
+        with (patch.object(metered.pwd, 'getpwnam',
+                           return_value=FakeUser()),
+              patch.object(metered, 'run', return_value=result),
+              self.assertRaisesRegex(
+                  metered.TrialError, 'USER_MANAGER_STATUS_UNAVAILABLE')):
+            metered.user_unit_state('apple-sync-photos.service')
+
+    def test_expired_idle_window_never_reserves_a_pass(self):
+        with (patch.object(metered, 'guard_setup'),
+              patch.object(metered, 'BudgetLedger') as budget_ledger,
+              patch.object(metered, 'preflight'),
+              patch.object(metered, 'wait_for_idle_window',
+                           return_value=False) as gate,
+              patch.object(metered, 'trial') as trial,
+              patch.object(metered.os, 'geteuid', return_value=0),
+              patch('sys.argv', ['metered', '--execute', '--wait-idle']),
+              contextlib.redirect_stdout(io.StringIO())):
+            ledger = budget_ledger.return_value.__enter__.return_value
+            ledger.remaining = metered.CAP_BYTES
+            ledger.summary.return_value = 'status'
+            self.assertEqual(metered.main(), 0)
+            ledger.begin.assert_not_called()
+        gate.assert_called_once()
+        trial.assert_not_called()
+
     def test_user_timer_active_is_a_hard_blocker(self):
         class FakeUser:
             pw_uid = 1000
