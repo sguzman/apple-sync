@@ -25,6 +25,7 @@ class MeteredLauncherTests(unittest.TestCase):
         self.assertIn('/usr/local/libexec/apple-sync-drive-metered/'
                       'metered_drive_inventory_trial.py', service)
         self.assertIn('--persistent-rc --wait-idle', service)
+        self.assertIn('--passes 8', service)
         self.assertNotIn('[Install]', service)
         self.assertNotIn('OnCalendar=', service)
         self.assertNotIn('Restart=always', service)
@@ -34,6 +35,8 @@ class MeteredLauncherTests(unittest.TestCase):
                 '49-apple-sync-drive-metered.rules').read_text()
         self.assertIn('action.lookup("unit") === '
                       '"apple-sync-drive-metered-manual.service"', rule)
+        self.assertIn('action.lookup("unit") === '
+                      '"apple-sync-drive-metered-single.service"', rule)
         self.assertIn('action.lookup("verb") === "start"', rule)
         self.assertIn('subject.user === "sguzman"', rule)
         self.assertIn('subject.local && subject.active', rule)
@@ -46,6 +49,7 @@ class MeteredLauncherTests(unittest.TestCase):
         self.assertEqual(copied, {
             'metered_drive_inventory_trial.py', 'drive_meter_budget.py',
             'apple-sync-drive-metered-manual.service',
+            'apple-sync-drive-metered-single.service',
             '49-apple-sync-drive-metered.rules',
         })
         for _, destination in installer.COPIES:
@@ -154,6 +158,74 @@ class MeteredLauncherTests(unittest.TestCase):
               contextlib.redirect_stdout(io.StringIO())):
             self.assertEqual(launcher.main(), 0)
         auth.assert_called_once_with(launcher.INSTALLER)
+
+    def test_single_pass_service_is_static_one_pass_with_same_budget(self):
+        service = (ROOT / 'packaging' /
+                   'apple-sync-drive-metered-single.service').read_text()
+        self.assertIn('--execute --passes 1 --persistent-rc --wait-idle',
+                      service)
+        self.assertIn('/usr/local/libexec/apple-sync-drive-metered/'
+                      'metered_drive_inventory_trial.py', service)
+        self.assertNotIn('[Install]', service)
+        self.assertNotIn('OnCalendar=', service)
+        self.assertNotIn('Restart=always', service)
+
+    def test_one_pass_uses_only_single_fixed_service(self):
+        result = subprocess.CompletedProcess([], 0, '', '')
+        with (patch.object(launcher, 'service_state',
+                           return_value={'LoadState': 'loaded',
+                                         'ActiveState': 'inactive'}),
+              patch.object(launcher.subprocess, 'run',
+                           return_value=result) as runner,
+              contextlib.redirect_stdout(io.StringIO())):
+            target = launcher.request_start(1)
+        self.assertEqual(target, launcher.SINGLE_UNIT)
+        self.assertEqual(runner.call_args.args[0], [
+            'systemctl', '--system', '--no-block', 'start',
+            launcher.SINGLE_UNIT])
+
+    def test_one_pass_refuses_if_eight_pass_is_already_running(self):
+        with (patch.object(launcher, 'service_state',
+                           side_effect=[
+                               {'LoadState': 'loaded', 'ActiveState': 'inactive'},
+                               {'LoadState': 'loaded', 'ActiveState': 'active'}]),
+              patch.object(launcher.subprocess, 'run') as runner,
+              self.assertRaisesRegex(
+                  launcher.LauncherError,
+                  'ANOTHER_METERED_SERVICE_RUNNING')):
+            launcher.request_start(1)
+        runner.assert_not_called()
+
+    def test_eight_pass_refuses_if_one_pass_is_running(self):
+        with (patch.object(launcher, 'service_state',
+                           side_effect=[
+                               {'LoadState': 'loaded', 'ActiveState': 'inactive'},
+                               {'LoadState': 'loaded', 'ActiveState': 'activating'}]),
+              patch.object(launcher.subprocess, 'run') as runner,
+              self.assertRaisesRegex(
+                  launcher.LauncherError,
+                  'ANOTHER_METERED_SERVICE_RUNNING')):
+            launcher.request_start(8)
+        runner.assert_not_called()
+
+    def test_one_pass_requires_installed_unit_not_dynamic_override(self):
+        with (patch.object(launcher, 'service_state',
+                           return_value={'LoadState': 'not-found',
+                                         'ActiveState': 'inactive'}),
+              patch.object(launcher.subprocess, 'run') as runner,
+              self.assertRaisesRegex(
+                  launcher.LauncherError, 'MANUAL_SERVICE_NOT_INSTALLED')):
+            launcher.request_start(1)
+        runner.assert_not_called()
+
+    def test_arbitrary_pass_counts_refused_without_systemd_call(self):
+        with (patch.object(launcher, 'service_state') as state,
+              patch.object(launcher.subprocess, 'run') as runner,
+              self.assertRaisesRegex(
+                  launcher.LauncherError, 'UNSUPPORTED_PASS_COUNT')):
+            launcher.request_start(2)
+        state.assert_not_called()
+        runner.assert_not_called()
 
     def test_start_refuses_missing_unit(self):
         with (patch.object(launcher, 'service_state',
