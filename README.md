@@ -538,6 +538,21 @@ remote offsets. They must be strictly increasing and within the current
 saved checkpoint. For future comparisons, use the new completed-folder
 counts from successive normal-user `status` outputs.
 
+### Offline pending-folder ID audit (no network)
+
+To assess whether the incomplete checkpoint already contains directory IDs
+for a possible future batched Apple metadata reader, run:
+
+    python3 scripts/drive_pending_id_audit.py
+
+This examines the local private Drive checkpoint only. It prints aggregate
+counts of pending folders, missing/ambiguous directory records, usable-looking
+IDs and collisions, never any paths or IDs. It does not call rclone or Apple,
+spend bandwidth, write state, or authorize another inventory pass. A positive
+result is a *structural prerequisite*, not evidence that a batched API path
+would preserve listing completeness or reduce measured network traffic.
+The existing manual-only metered scanner and budget remain unchanged.
+
 ## Metered, cumulative-budget Drive inventory (administrative opt-in)
 
 The old hourly **user** inventory service has no IP-accounting history;
