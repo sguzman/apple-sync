@@ -34,8 +34,8 @@ class BuildError(Exception):
 
 def _stop_subprocess_group(process: subprocess.Popen) -> None:
     """Stop both go and its compiler children on timeout or interruption."""
-    if process.poll() is not None:
-        return
+    # A child compiler may outlive its go parent and keep stdout open.
+    # Signal the entire group even if the group leader has already exited.
     try:
         os.killpg(process.pid, signal.SIGTERM)
     except ProcessLookupError:
