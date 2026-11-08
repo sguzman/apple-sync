@@ -84,6 +84,32 @@ A full inventory is **not** complete simply because an API returns HTTP 200,
 a folder has a plausible number of children, or the Python tests pass.
 Never advance a pending folder merely because it appeared in a batch.
 
+## Recovery after interrupted builds (2026-11-08)
+
+The first workstation attempt passed all 319 Python tests and the targeted
+Go addon tests, then exited after starting the full Go build. Its unhelpful
+`LOCAL_BUILD_ERROR` may indicate the former 15-minute timeout, but the
+available log cannot prove that was the sole cause. It is **not** evidence
+that any iCloud data was modified.
+
+The build launcher now holds a nonblocking exclusive lock in its private
+source-cache directory. A second invocation reports
+`BUILD_ALREADY_RUNNING_NO_CHANGES` without touching source, Go caches,
+binaries or archives. Locks release when the owning process exits, including
+after interruption. Prior gofmt-normalized addon files are accepted if
+identical to the canonical originals; unexpected edits are rejected.
+A matching already-built experimental binary is checked and reused
+rather than overwritten. Go build timeout is raised from 900 to 3600
+seconds, and timeouts report the failed stage by name. When a subprocess
+fails or is interrupted, the launcher terminates its entire process group
+so compiler children do not remain running.
+
+Neither the repair nor its tests remove the existing cache, alter the
+installed `/usr/bin/rclone`, or touch cloud archive state. If the next
+isolated build fails, retain its stage-specific error; **do not clean or
+reset either the iCloud checkpoint or the metering ledger**. The actual
+tagged binary and live API behavior still need validation on the workstation.
+
 ## Offline tests
 
 Run from the checked-out `apple-sync` repository:
