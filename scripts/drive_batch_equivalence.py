@@ -4,7 +4,7 @@
 Compare already obtained Apple batch envelopes against rclone lsjson listings.
 No network, output files, checkpoint mutation, or credential handling.
 This is a diagnostic gate, NOT permission to commit batch results.
-Names may be encoded by rclone: compare by stable Drive ID, not raw names.
+The experimental Go adapter applies rclone's name encoding first; compare the resulting names as well as stable Drive IDs.
 """
 from __future__ import annotations
 
@@ -88,6 +88,17 @@ def compare_with_legacy(
                 raise BatchEquivalenceError('REFERENCE_IDENTITY_MISMATCH')
             seen.add(identifier)
             raw = raw_by_id[identifier]
+            # The experimental Go adapter uses ToStandardName on both
+            # components, just like rclone's existing List implementation.
+            native_name = raw.get('name')
+            native_extension = raw.get('extension', '')
+            if (not isinstance(native_name, str) or not native_name
+                    or not isinstance(native_extension, str)):
+                raise BatchEquivalenceError('MISSING_NATIVE_NAME')
+            expected_name = native_name + (
+                '.' + native_extension if native_extension else '')
+            if label != expected_name:
+                raise BatchEquivalenceError('REFERENCE_NAME_MISMATCH')
             expected_dir = raw['type'] in DIRECTORY_TYPES
             if type(row.get('IsDir')) is not bool or row['IsDir'] != expected_dir:
                 raise BatchEquivalenceError('REFERENCE_TYPE_MISMATCH')
