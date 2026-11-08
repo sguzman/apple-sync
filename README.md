@@ -551,6 +551,17 @@ IDs and collisions, never any paths or IDs. It does not call rclone or Apple,
 spend bandwidth, write state, or authorize another inventory pass. A positive
 result is a *structural prerequisite*, not evidence that a batched API path
 would preserve listing completeness or reduce measured network traffic.
+
+The experimental pure helper in `scripts/drive_batch_contract.py` is not
+wired into any live scanner. It proposes bounded groups (four folders by
+default; eight maximum) from cached, unique pending directory IDs and verifies
+the *outer envelope* of synthetic multi-folder responses. It rejects missing
+or duplicate target IDs, unexpected statuses, and missing or inconsistent
+child counts without including private paths or IDs in errors. This is **not**
+an Apple API client, does not validate per-file metadata equivalence and must
+never mark checkpoint folders complete. Before live use, an authenticated
+rclone-backed transport and a small, explicitly metered comparison with the
+existing reader are still required.
 The existing manual-only metered scanner and budget remain unchanged.
 
 ## Metered, cumulative-budget Drive inventory (administrative opt-in)
