@@ -19,6 +19,7 @@ import time
 import polkit_authorization as polkit
 
 UNIT = 'apple-sync-drive-metered-manual.service'
+SINGLE_UNIT = 'apple-sync-drive-metered-single.service'
 STATUS = Path('/var/lib/apple-sync-drive-metered-status.json')
 INSTALLER = Path('/home/sguzman/Code/Sync/apple-sync/scripts/install_metered_launcher.py')
 MAX_MONITOR_SECONDS = 35 * 60 + 30
@@ -55,9 +56,9 @@ def public_budget(path: Path = STATUS) -> dict | None:
     return data
 
 
-def service_state() -> dict:
+def service_state(unit: str = UNIT) -> dict:
     result = subprocess.run(
-        ['systemctl', '--system', 'show', UNIT, '-p', 'LoadState',
+        ['systemctl', '--system', 'show', unit, '-p', 'LoadState',
          '-p', 'ActiveState', '-p', 'SubState', '-p', 'Result'],
         capture_output=True, text=True, check=False, timeout=10)
     if result.returncode:
@@ -70,6 +71,10 @@ def show_state(*, checkpoint: bool = True) -> dict:
     state = service_state()
     print('METERED SERVICE: ' + state.get('ActiveState', 'unknown') +
           ' (result=' + state.get('Result', 'unknown') + ')', flush=True)
+    single = service_state(SINGLE_UNIT)
+    print('ONE-PASS SERVICE: ' + single.get('ActiveState', 'unknown') +
+          ' (loaded=' + single.get('LoadState', 'unknown') + ', result=' +
+          single.get('Result', 'unknown') + ')', flush=True)
     budget = public_budget()
     if budget is None:
         print('PUBLIC BUDGET: not yet published by installed controller',
@@ -89,21 +94,32 @@ def show_state(*, checkpoint: bool = True) -> dict:
     return state
 
 
-def request_start() -> None:
-    state = service_state()
+def request_start(passes: int = 8) -> str:
+    if passes not in (1, 8):
+        raise LauncherError('UNSUPPORTED_PASS_COUNT')
+    target = SINGLE_UNIT if passes == 1 else UNIT
+    state = service_state(target)
     if state.get('LoadState') != 'loaded':
         raise LauncherError('MANUAL_SERVICE_NOT_INSTALLED')
     if state.get('ActiveState') in ('active', 'activating', 'reloading'):
         raise LauncherError('MANUAL_SERVICE_ALREADY_RUNNING')
+    # Avoid launching the other controller even though the shared private
+    # ledger already serializes and fails closed on overlapping jobs.
+    other = UNIT if passes == 1 else SINGLE_UNIT
+    other_state = service_state(other)
+    if other_state.get('ActiveState') in ('active', 'activating', 'reloading'):
+        raise LauncherError('ANOTHER_METERED_SERVICE_RUNNING')
     result = subprocess.run(
-        ['systemctl', '--system', '--no-block', 'start', UNIT],
+        ['systemctl', '--system', '--no-block', 'start', target],
         capture_output=True, text=True, timeout=30, check=False)
     if result.returncode:
         raise LauncherError('START_NOT_AUTHORIZED_OR_SYSTEMD_REFUSED')
-    print('METERED SCAN REQUEST ACCEPTED; no timer enabled', flush=True)
+    print(f'METERED SCAN REQUEST ACCEPTED: up to {passes} pass(es); '
+          'no timer enabled', flush=True)
+    return target
 
 
-def monitor() -> None:
+def monitor(unit: str = UNIT) -> None:
     print('Monitoring public counters. Ctrl+C detaches; scan continues.',
           flush=True)
     start = time.monotonic()
@@ -121,7 +137,7 @@ def monitor() -> None:
                   f'pending={"yes" if budget["pending"] else "no"}',
                   flush=True)
             previous = signature
-        state = service_state()
+        state = service_state(unit)
         if state.get('ActiveState') not in ('active', 'activating', 'reloading'):
             print('METERED SERVICE FINISHED: '
                   + state.get('ActiveState', 'unknown')
@@ -141,6 +157,9 @@ def main() -> int:
     parser.add_argument('action', choices=('install', 'run', 'status', 'doctor'))
     parser.add_argument('--detach', action='store_true',
                         help='start and exit without monitoring')
+    parser.add_argument('--passes', type=int, choices=(1, 8), default=8,
+                        help='for run: fixed one-pass service or existing '
+                             'eight-pass service (default)')
     args = parser.parse_args()
     if os.geteuid() == 0:
         print('RUN_THIS_LAUNCHER_AS_NORMAL_USER', file=sys.stderr)
@@ -163,9 +182,9 @@ def main() -> int:
         if args.action == 'status':
             show_state()
             return 0
-        request_start()
+        unit = request_start(args.passes)
         if not args.detach:
-            monitor()
+            monitor(unit)
         return 0
     except KeyboardInterrupt:
         print('Viewer detached; system service continues under its budget.',
