@@ -30,6 +30,16 @@ class ExperimentalBuildTests(unittest.TestCase):
                          'be8d6044eacb843b74d335db0c5fbe09222031fe')
         self.assertEqual(builder.BUILD_TAG, 'apple_sync_experimental')
 
+    def test_build_arguments_embed_pinned_release_and_experimental_tag(self):
+        target = Path('/private/build/rclone-batch')
+        argv = builder.go_build_arguments(target)
+        self.assertEqual(argv, [
+            'go', 'build', '-tags', 'apple_sync_experimental',
+            '-ldflags', '-X github.com/rclone/rclone/fs.Version=v1.75.2',
+            '-o', str(target), '.'])
+        self.assertNotIn('--config', argv)
+        self.assertNotIn('install', argv)
+
     def test_existing_checkout_requires_exact_origin_and_commit(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)
