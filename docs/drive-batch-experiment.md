@@ -52,12 +52,21 @@ network efficiency, or error semantics.
 
 Before any Apple network experiment:
 
-1. Inspect the actual `rclone version` and select a compatible upstream
-   checkout/tag. Build an isolated test binary using the addon and
-   `-tags apple_sync_experimental`, with only the official module dependencies.
-   Do **not** overwrite the installed rclone binary or change PATH.
-2. Execute the Go addon unit tests with that tag and the existing Python suite.
-   Reject any upstream API differences instead of adapting blindly.
+1. The workstation reports **rclone v1.75.2** (2026-11-08).
+   `scripts/build_rclone_batch.py --execute` is now the isolated build
+   launcher. It fetches public source from `rclone/rclone` tag `v1.75.2`
+   and **requires** commit `be8d6044eacb843b74d335db0c5fbe09222031fe`.
+   It copies only the two addon files into a private source checkout under
+   `~/.cache/apple-sync/rclone/v1.75.2`, formats them, runs the targeted Go
+   tests, then builds an isolated binary at
+   `~/.local/share/apple-sync/experimental/rclone-batch-v1.75.2`.
+   The script does not touch the installed rclone binary or PATH.
+   Without `--execute` it only prints the plan.
+2. Validate the **actual output** of the Go test/build and the existing
+   Python suite on the workstation. The build fetches public GitHub sources
+   and Go modules but makes no Apple requests. Reject any upstream API
+   differences instead of adapting blindly. Never treat a successful build
+   as authorization to scan.
 3. Implement a new, deliberately opt-in system-metered probe with the existing
    exclusive backup lock, backup-idle checks, root-owned ledger, soft bandwidth
    cutoff and no checkpoint writes. The existing manual one/eight-pass service
