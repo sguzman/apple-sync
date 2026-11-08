@@ -156,12 +156,70 @@ class ExperimentalBuildTests(unittest.TestCase):
     def test_existing_binary_is_verified_without_replacement(self):
         with tempfile.TemporaryDirectory() as tmp:
             binary = Path(tmp) / 'rclone-batch'
-            binary.write_text('#!/bin/sh\nprintf "rclone v1.75.2\\n- go/tags: apple_sync_experimental\\n"\n')
+            binary.write_text('stand-in for a verified executable')
             binary.chmod(0o700)
-            self.assertTrue(builder.existing_binary_verified(binary))
-            binary.write_text('#!/bin/sh\nprintf "rclone v1.75.2\\n- go/tags: none\\n"\n')
-            with self.assertRaisesRegex(builder.BuildError, 'UNVERIFIED'):
-                builder.existing_binary_verified(binary)
+            with patch.object(builder, 'run', side_effect=[
+                    self._rclone_version(), self._go_metadata()]) as mock:
+                self.assertTrue(builder.existing_binary_verified(binary))
+                self.assertEqual(mock.call_count, 2)
+            self.assertEqual(binary.read_text(), 'stand-in for a verified executable')
+            with patch.object(builder, 'run', side_effect=[
+                    self._rclone_version(), self._go_metadata(tag='none')]):
+                with self.assertRaisesRegex(builder.BuildError, 'UNVERIFIED'):
+                    builder.existing_binary_verified(binary)
+
+    @staticmethod
+    def _rclone_version():
+        # rclone's go/tags output is allowed to say "none" even when
+        # the Go executable was compiled with -tags.
+        return 'rclone v1.75.2\n- go/tags: none'
+
+    @staticmethod
+    def _go_metadata(module='github.com/rclone/rclone',
+                     tag='apple_sync_experimental'):
+        return ('/private/rclone: go1.27.2\n'
+                '\tpath\t' + module + '\n'
+                '\tbuild\t-tags=' + tag)
+
+    def test_accepts_tag_in_go_build_metadata_not_rclone_display(self):
+        with patch.object(builder, 'run', side_effect=[
+                self._rclone_version(), self._go_metadata()]):
+            self.assertIn('rclone v1.75.2',
+                          builder.verify_binary_identity(Path('/private/rclone')))
+
+    def test_rejects_wrong_binary_module_and_missing_tag(self):
+        invalid_cases = [
+            (self._go_metadata(module='github.com/other/rclone'), 'MODULE_MISMATCH'),
+            (self._go_metadata(tag='none'), 'TAG_MISSING'),
+            (self._go_metadata(tag='not_apple_sync_experimental'), 'TAG_MISSING'),
+            (self._go_metadata(tag=''), 'TAG_MISSING'),
+            ('go1.27.2\n\tpath\tgithub.com/rclone/rclone', 'TAG_MISSING'),
+        ]
+        for metadata, error in invalid_cases:
+            with self.subTest(error=error, metadata=metadata):
+                with patch.object(builder, 'run', side_effect=[
+                        self._rclone_version(), metadata]):
+                    with self.assertRaisesRegex(builder.BuildError, error):
+                        builder.verify_binary_identity(Path('/private/rclone'))
+
+    def test_rejects_wrong_rclone_version_without_go_read(self):
+        with patch.object(builder, 'run', return_value='rclone v1.75.1\n- go/tags: none') as mock:
+            with self.assertRaisesRegex(builder.BuildError, 'RCLONE_VERSION_MISMATCH'):
+                builder.verify_binary_identity(Path('/private/rclone'))
+        mock.assert_called_once()
+
+    def test_accepts_tag_in_comma_separated_go_build_tags(self):
+        with patch.object(builder, 'run', side_effect=[
+                self._rclone_version(),
+                self._go_metadata(tag='cmount,apple_sync_experimental,foo')]):
+            builder.verify_binary_identity(Path('/private/rclone'))
+
+    def test_rejects_duplicate_metadata_tag_keys(self):
+        with patch.object(builder, 'run', side_effect=[
+                self._rclone_version(),
+                self._go_metadata() + '\n\tbuild\t-tags=apple_sync_experimental']):
+            with self.assertRaisesRegex(builder.BuildError, 'TAG_MISSING'):
+                builder.verify_binary_identity(Path('/private/rclone'))
 
     def test_existing_binary_symlink_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
