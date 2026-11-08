@@ -21,12 +21,14 @@ def target(identifier, children):
             'directChildrenCount': len(children), 'items': children}
 
 
-def native_file(identifier, size=7):
-    return {'drivewsid': identifier, 'type': 'FILE', 'size': size, 'etag': 'raw-f'}
+def native_file(identifier, size=7, name='file', extension='dat'):
+    return {'drivewsid': identifier, 'type': 'FILE', 'size': size,
+            'name': name, 'extension': extension, 'etag': 'raw-f'}
 
 
 def native_dir(identifier):
-    return {'drivewsid': identifier, 'type': 'FOLDER', 'etag': 'raw-d'}
+    return {'drivewsid': identifier, 'type': 'FOLDER',
+            'name': 'folder', 'extension': '', 'etag': 'raw-d'}
 
 
 def legacy_file(identifier, name='file.dat', size=7):
@@ -53,11 +55,22 @@ class EquivalenceTests(unittest.TestCase):
 
     def test_preserves_same_visible_name_for_distinct_file_ids(self):
         batch = [('private/a', PARENT)]
-        native = [target(PARENT, [native_file(FILE1), native_file(FILE2)])]
+        native = [target(PARENT, [native_file(FILE1, name='same', extension=''),
+                                  native_file(FILE2, name='same', extension='')])]
         legacy = [('private/a', [legacy_file(FILE1, name='same'),
                                  legacy_file(FILE2, name='same')])]
         self.assertEqual(comparison.compare_with_legacy(batch, native, legacy)
                          ['files_matched'], 2)
+
+    def test_rejects_wrong_name_extension_and_missing_name(self):
+        batch = [('private/a', PARENT)]
+        for raw in (native_file(FILE1, name='other'),
+                    native_file(FILE1, extension='txt'),
+                    native_file(FILE1) | {'name': None}):
+            with self.subTest(raw=raw), self.assertRaises(comparison.BatchEquivalenceError):
+                comparison.compare_with_legacy(
+                    batch, [target(PARENT, [raw])],
+                    [('private/a', [legacy_file(FILE1)])])
 
     def test_rejects_identity_mismatch_and_wrong_size(self):
         batch = [('private/a', PARENT)]
