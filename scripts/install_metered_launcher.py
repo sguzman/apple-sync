@@ -20,12 +20,14 @@ USER = 'sguzman'
 SOURCE = Path('/home/sguzman/Code/Sync/apple-sync')
 LIBEXEC = Path('/usr/local/libexec/apple-sync-drive-metered')
 UNIT = Path('/etc/systemd/system/apple-sync-drive-metered-manual.service')
+SINGLE_UNIT = Path('/etc/systemd/system/apple-sync-drive-metered-single.service')
 RULE = Path('/etc/polkit-1/rules.d/49-apple-sync-drive-metered.rules')
 COPIES = (
     ('scripts/metered_drive_inventory_trial.py',
      LIBEXEC / 'metered_drive_inventory_trial.py'),
     ('scripts/drive_meter_budget.py', LIBEXEC / 'drive_meter_budget.py'),
     ('packaging/apple-sync-drive-metered-manual.service', UNIT),
+    ('packaging/apple-sync-drive-metered-single.service', SINGLE_UNIT),
     ('packaging/49-apple-sync-drive-metered.rules', RULE),
 )
 
@@ -84,22 +86,26 @@ def install() -> None:
         raise InstallationError('SOURCE_REPOSITORY_UNAVAILABLE')
     if not shutil.which('systemctl') or not shutil.which('runuser'):
         raise InstallationError('SYSTEMD_OR_RUNUSER_MISSING')
-    state = subprocess.run(
-        ['systemctl', 'show', UNIT.name, '--property=ActiveState', '--value'],
-        check=False, capture_output=True, text=True, timeout=10)
-    if state.returncode == 0 and state.stdout.strip() in ('active', 'activating'):
-        raise InstallationError('METERED_SERVICE_ALREADY_RUNNING')
+    for service in (UNIT, SINGLE_UNIT):
+        state = subprocess.run(
+            ['systemctl', 'show', service.name, '--property=ActiveState',
+             '--value'],
+            check=False, capture_output=True, text=True, timeout=10)
+        if (state.returncode == 0 and
+                state.stdout.strip() in ('active', 'activating')):
+            raise InstallationError('METERED_SERVICE_ALREADY_RUNNING')
     for rel, dest in COPIES:
         atomic_install(SOURCE / rel, dest)
     subprocess.run(['systemctl', 'daemon-reload'], check=True, timeout=20)
-    enabled = subprocess.run(
-        ['systemctl', 'is-enabled', UNIT.name],
-        capture_output=True, text=True, check=False, timeout=10)
-    if enabled.stdout.strip() in (
-            'enabled', 'enabled-runtime', 'linked', 'linked-runtime'):
-        raise InstallationError('MANUAL_SERVICE_UNEXPECTEDLY_ENABLED')
+    for service in (UNIT, SINGLE_UNIT):
+        enabled = subprocess.run(
+            ['systemctl', 'is-enabled', service.name],
+            capture_output=True, text=True, check=False, timeout=10)
+        if enabled.stdout.strip() in (
+                'enabled', 'enabled-runtime', 'linked', 'linked-runtime'):
+            raise InstallationError('MANUAL_SERVICE_UNEXPECTEDLY_ENABLED')
     print('MANUAL_METERED_LAUNCHER_INSTALLED: static service, not enabled')
-    print('Polkit permission: active local user may start this one service')
+    print('Polkit permission: active local user may start either fixed manual service')
     print('No inventory scan, backup job, or timer was started or changed')
 
 
