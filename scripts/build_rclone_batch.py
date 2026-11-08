@@ -195,6 +195,13 @@ def stage_addons(source: Path) -> None:
             dst.write_bytes(expected)
 
 
+def go_build_arguments(output: Path) -> list[str]:
+    """Compile pinned release version, without modifying upstream source."""
+    return ['go', 'build', '-tags', BUILD_TAG, '-ldflags',
+            f'-X github.com/rclone/rclone/fs.Version={RCLONE_TAG}',
+            '-o', str(output), '.']
+
+
 def build(*, source: Path, binary: Path, clone: bool = True) -> None:
     checked_directory(source.parent, create=True)
     checked_directory(binary.parent, create=True)
@@ -226,8 +233,7 @@ def build(*, source: Path, binary: Path, clone: bool = True) -> None:
     with tempfile.TemporaryDirectory(prefix='.rclone-batch-build-',
                                      dir=binary.parent) as tmp:
         temp_binary = Path(tmp) / 'rclone-batch'
-        run(['go', 'build', '-tags', BUILD_TAG,
-             '-o', str(temp_binary), '.'], cwd=source, env=environment,
+        run(go_build_arguments(temp_binary), cwd=source, env=environment,
             stage='GO_BINARY_BUILD', timeout=GO_BUILD_TIMEOUT_SECONDS)
         metadata = temp_binary.stat()
         if (not stat.S_ISREG(metadata.st_mode) or
