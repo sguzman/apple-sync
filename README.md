@@ -562,6 +562,17 @@ an Apple API client, does not validate per-file metadata equivalence and must
 never mark checkpoint folders complete. Before live use, an authenticated
 rclone-backed transport and a small, explicitly metered comparison with the
 existing reader are still required.
+
+`scripts/drive_batch_equivalence.py` now supplies that *offline* comparison
+contract. Given already acquired native Apple batch replies and independent
+per-folder `rclone lsjson` listings, it cross-checks Drive identities,
+file/directory classification, ETags for directories, and ordinary file
+sizes; it returns only aggregate counts. Rclone files expose bare Drive IDs,
+while directories expose `DriveID#ETag`. Any unexpected or missing metadata
+fails closed. The helper deliberately performs no Apple requests and never
+writes or advances the inventory. No live transport or dual-reader sampling
+has been authorized or implemented; tests use synthetic metadata only.
+
 The existing manual-only metered scanner and budget remain unchanged.
 
 ## Metered, cumulative-budget Drive inventory (administrative opt-in)
