@@ -465,19 +465,36 @@ pkexec. The authorization is necessary because systemd IPAccounting is
 available for system services, not ordinary per-user services. The installer
 copies the privileged controller and budget ledger module into a root-owned
 /usr/local/libexec/apple-sync-drive-metered/ directory and installs a
-**static, manual-only** system unit and an exact **start-only** Polkit rule
-for active local user sguzman. It never enables or starts any service or
+**two static, manual-only** system units and an exact **start-only** Polkit
+rule for active local user sguzman. It never enables or starts any service or
 timer, does not grant general administrative permissions, and leaves the
 existing inventory checkpoint and 100 MB ledger untouched.
 
 After installation, use these commands **without sudo or repeat password
 prompts**:
 
+    python3 scripts/drive_metered.py run --passes 1
     python3 scripts/drive_metered.py run
     python3 scripts/drive_metered.py status
 
-The run command launches the installed root-owned controller as a fixed
-batch of up to eight 90-second metered passes with persistent RC and
+Use `run --passes 1` for **one** metered 90-second pass, or `run` for
+the preexisting **eight-pass** fixed service. Both services share the
+same 100 MB durable ledger and identical persistent RC + idle protections,
+and the launcher refuses to start one when the other is active.
+The pass count is chosen from two root-owned static unit definitions; it
+cannot be used to pass arbitrary options to the privileged controller.
+Both services are manual-only, without any timers or automatic starts.
+
+**If the eight-pass service was installed before the single-pass
+feature was added**, the new one-pass unit is *not installed yet*.
+Run the test suite, then invoke `python3 scripts/drive_metered.py install`
+once from the normal local terminal. This requests one explicit Polkit
+administrator authorization again to install the extra root-owned unit and
+update the exact start-only rule. It **does not** execute an inventory pass,
+reinitialize the budget, reset the checkpoint, or alter backup timers.
+After that, `run --passes 1` needs no repeated password prompt.
+
+The run command launches the installed root-owned controller with
 bounded backup-idle waiting. The viewer shows aggregate progress and
 current status; Ctrl+C detaches the viewer but leaves the metered service
 running. Add --detach to run to request a batch and return immediately.
