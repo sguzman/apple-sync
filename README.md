@@ -596,9 +596,12 @@ with an exclusive build lock, retry-safe gofmt staging, specific error codes,
 longer bounded Go compilation, process-group cleanup, and non-overwriting
 verification of an already built experimental binary. The targeted Go addon tests and full `go build` subsequently
 passed on the workstation, but the launcher rejected the temporary binary
-because its original tag check confused rclone's curated `go/tags` display
-with Go's actual `-tags` build metadata. This has been corrected using
-`go version -m` with strict module and tag verification. The isolated
+because its original verification confused rclone's curated
+`go/tags` display with Go's actual `-tags` build metadata, and the
+original build omitted the pinned release-version linker stamp (leaving
+rclone's default `-DEV` suffix). These have been corrected using
+`go version -m` with strict module/tag checks and an explicit upstream
+`fs.Version=v1.75.2` linker variable. The isolated
 binary has **not yet been published or accepted on the host**; the live
 Apple batch reader has never been enabled. See
 [the recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
