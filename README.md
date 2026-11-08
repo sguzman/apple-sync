@@ -590,8 +590,14 @@ network access via `python3 scripts/build_rclone_batch.py`; explicitly run
 `python3 scripts/build_rclone_batch.py --execute` to fetch public rclone/Go
 dependencies, compile the experimental addon and run its targeted Go tests.
 It builds outside the user's installed rclone path, does not configure
-credentials, call Apple or touch any inventory checkpoints. The build and
-the live Apple batch reader remain **unverified** until tested on the host.
+credentials, call Apple or touch any inventory checkpoints. After the initial
+workstation build timed out or otherwise failed, the launcher was hardened
+with an exclusive build lock, retry-safe gofmt staging, specific error codes,
+longer bounded Go compilation, process-group cleanup, and non-overwriting
+verification of an already built experimental binary. The targeted Go addon
+tests previously passed, but the full binary build and live Apple batch reader
+remain **unverified** until tested on the host. See
+[the recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 No live batch scanner is enabled.
 
 ## Metered, cumulative-budget Drive inventory (administrative opt-in)
