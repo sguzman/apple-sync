@@ -1,0 +1,16 @@
+[Unit]
+Description=Manually requested, single-pass metered iCloud Drive metadata inventory
+Documentation=https://github.com/sguzman/apple-sync
+After=local-fs.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/usr/local/libexec/apple-sync-drive-metered
+ExecStart=/usr/bin/python3 /usr/local/libexec/apple-sync-drive-metered/metered_drive_inventory_trial.py --execute --passes 1 --persistent-rc --wait-idle
+TimeoutStartSec=15min
+UMask=0077
+Nice=10
+StandardOutput=journal
+StandardError=journal
+
+# Static manual-only unit; no enablement or scheduling.
