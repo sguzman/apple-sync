@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 import contextlib
 import io
+import stat
 import sys
 import tempfile
 import unittest
@@ -70,6 +71,104 @@ class ExperimentalBuildTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaisesRegex(builder.BuildError, 'UNTRUSTED'):
                 builder.verify_checkout(Path(tmp))
+
+
+    def test_second_build_cannot_enter_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / 'locks'
+            with builder.exclusive_build_lock(directory):
+                with self.assertRaisesRegex(builder.BuildError, 'BUILD_ALREADY_RUNNING'):
+                    with builder.exclusive_build_lock(directory):
+                        self.fail('second build entered exclusive section')
+            with builder.exclusive_build_lock(directory):
+                pass
+
+    def test_lock_file_symlink_rejected_without_target_change(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / 'locks'
+            directory.mkdir()
+            target = Path(tmp) / 'protected'
+            target.write_text('original')
+            (directory / '.experimental-build.lock').symlink_to(target)
+            with self.assertRaisesRegex(builder.BuildError, 'BUILD_LOCK_UNAVAILABLE'):
+                with builder.exclusive_build_lock(directory):
+                    pass
+            self.assertEqual(target.read_text(), 'original')
+
+    def test_lock_bad_mode_rejected_without_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            lock = directory / '.experimental-build.lock'
+            lock.touch(mode=0o666)
+            lock.chmod(0o644)
+            with self.assertRaisesRegex(builder.BuildError, 'UNSAFE_BUILD_LOCK_FILE'):
+                with builder.exclusive_build_lock(directory):
+                    pass
+            self.assertEqual(stat.S_IMODE(lock.stat().st_mode), 0o644)
+
+    def test_timeout_is_actionable_without_raw_arguments(self):
+        with self.assertRaisesRegex(builder.BuildError, 'MOCK_TASK_TIMED_OUT') as caught:
+            builder.run([sys.executable, '-c', 'import time; time.sleep(3)'],
+                        timeout=0.2, stage='MOCK_TASK')
+        self.assertNotIn('time.sleep', str(caught.exception))
+
+    def test_missing_command_is_actionable(self):
+        with self.assertRaisesRegex(builder.BuildError, 'TEST_COMMAND_START_FAILED'):
+            builder.run(['/nonexistent/example-builder-tool'],
+                        stage='TEST_COMMAND')
+
+    def test_previously_formatted_addons_are_reusable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            addon_root = root / 'repo' / 'rclone-addon' / 'iclouddrive'
+            addon_root.mkdir(parents=True)
+            for name in builder.ADDON_FILES:
+                (addon_root / name).write_text('package iclouddrive\n\nfunc test(){println("ok")}\n')
+            checkout = root / 'rclone'
+            (checkout / 'backend' / 'iclouddrive').mkdir(parents=True)
+            with patch.object(builder, 'REPO_ROOT', root / 'repo'):
+                builder.stage_addons(checkout)
+                prior = [(checkout / 'backend' / 'iclouddrive' / name).read_bytes()
+                         for name in builder.ADDON_FILES]
+                builder.stage_addons(checkout)
+                again = [(checkout / 'backend' / 'iclouddrive' / name).read_bytes()
+                         for name in builder.ADDON_FILES]
+                self.assertEqual(prior, again)
+                self.assertNotEqual(prior[0], (addon_root / builder.ADDON_FILES[0]).read_bytes())
+                self.assertIn(b'func test() {', prior[0])
+
+    def test_modified_cached_addon_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            addon_root = root / 'repo' / 'rclone-addon' / 'iclouddrive'
+            addon_root.mkdir(parents=True)
+            for name in builder.ADDON_FILES:
+                (addon_root / name).write_text('package iclouddrive\n')
+            checkout = root / 'rclone'
+            target = checkout / 'backend' / 'iclouddrive'
+            target.mkdir(parents=True)
+            (target / builder.ADDON_FILES[0]).write_text('modified code\n')
+            with patch.object(builder, 'REPO_ROOT', root / 'repo'):
+                with self.assertRaisesRegex(builder.BuildError, 'ALREADY_MODIFIED'):
+                    builder.stage_addons(checkout)
+            self.assertEqual((target / builder.ADDON_FILES[0]).read_text(), 'modified code\n')
+
+    def test_existing_binary_is_verified_without_replacement(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp) / 'rclone-batch'
+            binary.write_text('#!/bin/sh\nprintf "rclone v1.75.2\\n- go/tags: apple_sync_experimental\\n"\n')
+            binary.chmod(0o700)
+            self.assertTrue(builder.existing_binary_verified(binary))
+            binary.write_text('#!/bin/sh\nprintf "rclone v1.75.2\\n- go/tags: none\\n"\n')
+            with self.assertRaisesRegex(builder.BuildError, 'UNVERIFIED'):
+                builder.existing_binary_verified(binary)
+
+    def test_existing_binary_symlink_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp) / 'rclone-batch'
+            binary.symlink_to(Path(tmp) / 'none')
+            with self.assertRaisesRegex(builder.BuildError, 'UNSAFE_EXPERIMENTAL_BINARY'):
+                builder.existing_binary_verified(binary)
 
 
 if __name__ == '__main__':
