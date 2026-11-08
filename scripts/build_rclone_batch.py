@@ -129,8 +129,33 @@ def verify_checkout(source: Path) -> None:
         raise BuildError('RCLONE_SOURCE_HAS_TRACKED_CHANGES')
 
 
+def verify_binary_identity(binary: Path) -> str:
+    """Require pinned rclone version, Go module identity and build tag.
+
+    Rclone's displayed 'go/tags' is assembled from buildinfo.Tags and does
+    NOT list arbitrary Go -tags values. The Go executable's own build
+    metadata (go version -m) records them exactly.
+    """
+    output = run([str(binary), 'version'], timeout=15,
+                 stage='VERIFY_RCLONE_VERSION')
+    if not output.splitlines() or output.splitlines()[0] != f'rclone {RCLONE_TAG}':
+        raise BuildError('RCLONE_VERSION_MISMATCH')
+    details = run(['go', 'version', '-m', str(binary)], timeout=15,
+                  stage='VERIFY_GO_BINARY_METADATA')
+    lines = [line.strip().split('\t') for line in details.splitlines()]
+    if not any(len(fields) >= 2 and fields[0] == 'path' and
+               fields[1] == 'github.com/rclone/rclone' for fields in lines):
+        raise BuildError('GO_BINARY_MODULE_MISMATCH')
+    tag_fields = [fields[1] for fields in lines if
+                  len(fields) >= 2 and fields[0] == 'build' and
+                  fields[1].startswith('-tags=')]
+    if len(tag_fields) != 1 or BUILD_TAG not in tag_fields[0][len('-tags='):].split(','):
+        raise BuildError('GO_BINARY_EXPERIMENTAL_TAG_MISSING')
+    return output
+
+
 def existing_binary_verified(binary: Path) -> bool:
-    """Do not overwrite or rerun a successfully tagged previous build."""
+    """Do not overwrite or rerun an already verified experimental binary."""
     if binary.is_symlink():
         raise BuildError('UNSAFE_EXPERIMENTAL_BINARY')
     if not binary.exists():
@@ -140,11 +165,10 @@ def existing_binary_verified(binary: Path) -> bool:
             metadata.st_uid != os.getuid() or
             not metadata.st_mode & stat.S_IXUSR):
         raise BuildError('UNTRUSTED_EXPERIMENTAL_BINARY')
-    output = run([str(binary), 'version'], timeout=15,
-                 stage='VERIFY_EXISTING_BINARY')
-    if (f'rclone {RCLONE_TAG}' not in output or
-            f'go/tags: {BUILD_TAG}' not in output):
-        raise BuildError('EXPERIMENTAL_BINARY_ALREADY_EXISTS_UNVERIFIED')
+    try:
+        verify_binary_identity(binary)
+    except BuildError:
+        raise BuildError('EXPERIMENTAL_BINARY_ALREADY_EXISTS_UNVERIFIED') from None
     return True
 
 
@@ -209,12 +233,10 @@ def build(*, source: Path, binary: Path, clone: bool = True) -> None:
         if (not stat.S_ISREG(metadata.st_mode) or
                 not metadata.st_mode & stat.S_IXUSR):
             raise BuildError('INVALID_EXPERIMENTAL_BINARY')
-        output = run([str(temp_binary), 'version'], cwd=source,
-                     timeout=15, stage='VERIFY_EXPERIMENTAL_BINARY')
-        if (f'rclone {RCLONE_TAG}' not in output or
-                f'go/tags: {BUILD_TAG}' not in output):
-            raise BuildError('EXPERIMENTAL_BINARY_VERSION_OR_TAG_MISMATCH')
+        output = verify_binary_identity(temp_binary)
         print(output, flush=True)
+        print('VERIFIED: pinned rclone version, Go module and experimental build tag',
+              flush=True)
         os.replace(temp_binary, binary)
     print('SUCCESS: standalone experimental binary built and tested', flush=True)
     print('Binary: ' + str(binary), flush=True)
