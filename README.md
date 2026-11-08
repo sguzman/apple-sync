@@ -583,6 +583,17 @@ for the exact verification gates.
 
 The existing manual-only metered scanner and budget remain unchanged.
 
+The host now reports rclone **v1.75.2**. An isolated Go build launcher
+at `scripts/build_rclone_batch.py` pins the upstream rclone source to commit
+`be8d6044eacb843b74d335db0c5fbe09222031fe`. Preview it without
+network access via `python3 scripts/build_rclone_batch.py`; explicitly run
+`python3 scripts/build_rclone_batch.py --execute` to fetch public rclone/Go
+dependencies, compile the experimental addon and run its targeted Go tests.
+It builds outside the user's installed rclone path, does not configure
+credentials, call Apple or touch any inventory checkpoints. The build and
+the live Apple batch reader remain **unverified** until tested on the host.
+No live batch scanner is enabled.
+
 ## Metered, cumulative-budget Drive inventory (administrative opt-in)
 
 The old hourly **user** inventory service has no IP-accounting history;
