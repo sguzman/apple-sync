@@ -104,6 +104,20 @@ seconds, and timeouts report the failed stage by name. When a subprocess
 fails or is interrupted, the launcher terminates its entire process group
 so compiler children do not remain running.
 
+The next workstation attempt passed the targeted Go backend tests and
+completed `go build`, but the launcher refused to publish the temporary
+binary with `EXPERIMENTAL_BINARY_VERSION_OR_TAG_MISMATCH`. This was a
+**verification implementation bug**: rclone's `version` command reports its
+own curated `buildinfo.Tags` (which may say `go/tags: none`), not arbitrary
+`go build -tags` values. The verification now checks the exact
+`rclone v1.75.2` identity **and** reads the compiled binary's module path
+and `-tags=apple_sync_experimental` entry using `go version -m`. Both are
+required before publishing or reusing the isolated binary. Offline tests
+cover truthful `go/tags: none`, wrong/missing tags, wrong module, wrong
+version and duplicate build-information fields. The previous unsuccessful
+temporary binary was not installed. Its Go compilation cache can still
+be reused by the next build; no reset is needed.
+
 Neither the repair nor its tests remove the existing cache, alter the
 installed `/usr/bin/rclone`, or touch cloud archive state. If the next
 isolated build fails, retain its stage-specific error; **do not clean or
