@@ -563,15 +563,23 @@ never mark checkpoint folders complete. Before live use, an authenticated
 rclone-backed transport and a small, explicitly metered comparison with the
 existing reader are still required.
 
-`scripts/drive_batch_equivalence.py` now supplies that *offline* comparison
-contract. Given already acquired native Apple batch replies and independent
-per-folder `rclone lsjson` listings, it cross-checks Drive identities,
-file/directory classification, ETags for directories, and ordinary file
-sizes; it returns only aggregate counts. Rclone files expose bare Drive IDs,
-while directories expose `DriveID#ETag`. Any unexpected or missing metadata
-fails closed. The helper deliberately performs no Apple requests and never
-writes or advances the inventory. No live transport or dual-reader sampling
-has been authorized or implemented; tests use synthetic metadata only.
+`scripts/drive_batch_equivalence.py` supplies an *offline* comparison
+contract for raw Apple batch replies versus independent `rclone lsjson`
+listings. It checks exact Drive IDs, normalized visible names and extensions,
+file/directory types, directory ETags and file sizes, returning anonymous
+aggregate counts only. Rclone files expose bare Drive IDs; directories expose
+`DriveID#ETag`. Inconsistency fails closed.
+
+An experimental, read-only backend command now exists in
+`rclone-addon/iclouddrive/apple_sync_batch.go`, protected by the
+`apple_sync_experimental` Go build tag. The bounded Unix-socket client
+`scripts/drive_batch_transport.py` only sends requests to an already-running,
+private, explicitly patched rclone instance. **The addon has not been compiled
+against the workstation's rclone version, is not active in the installed
+scanner, and has made no live Apple batch requests.** No direct transport
+invocation or checkpoint publication is authorized yet. See
+[the batch experiment engineering plan](docs/drive-batch-experiment.md)
+for the exact verification gates.
 
 The existing manual-only metered scanner and budget remain unchanged.
 
