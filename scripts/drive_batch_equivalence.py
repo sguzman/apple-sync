@@ -23,9 +23,9 @@ def _normalized_id(value: object) -> tuple[str, str]:
     if not isinstance(value, str) or not value:
         raise BatchEquivalenceError('MISSING_RCLONE_ID')
     parts = value.split('#', 1)
-    if len(parts) != 2 or not parts[0] or not parts[1]:
+    if not parts[0]:
         raise BatchEquivalenceError('INVALID_RCLONE_ID')
-    return parts[0], parts[1]
+    return parts[0], parts[1] if len(parts) == 2 else ''
 
 
 def compare_with_legacy(
@@ -91,9 +91,16 @@ def compare_with_legacy(
             expected_dir = raw['type'] in DIRECTORY_TYPES
             if type(row.get('IsDir')) is not bool or row['IsDir'] != expected_dir:
                 raise BatchEquivalenceError('REFERENCE_TYPE_MISMATCH')
-            if 'etag' in raw and (not isinstance(raw['etag'], str)
-                                  or raw['etag'] != etag):
-                raise BatchEquivalenceError('REFERENCE_ETAG_MISMATCH')
+            # Rclone joins ETags to *directory* IDs. File objects expose
+            # only the bare Drive ID, even when Apple supplies an ETag.
+            if expected_dir:
+                if '#' not in row['ID']:
+                    raise BatchEquivalenceError('REFERENCE_DIRECTORY_ETAG_MISSING')
+                if 'etag' in raw and (not isinstance(raw['etag'], str)
+                                      or raw['etag'] != etag):
+                    raise BatchEquivalenceError('REFERENCE_ETAG_MISMATCH')
+            elif '#' in row['ID']:
+                raise BatchEquivalenceError('UNEXPECTED_REFERENCE_FILE_ETAG')
             if expected_dir:
                 directories += 1
             else:
