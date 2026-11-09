@@ -184,6 +184,60 @@ require an appropriately bounded live pilot and acceptance of timestamp and
 per-reader bandwidth uncertainties. Do not enable existing timers or
 modify installed rclone by default.
 
+## Offline resumable-batch integration scaffold (2026-11-09)
+
+The verified live probe is now followed by a separate **non-executing**
+scanner scaffold. The following modules are deliberately **not installed,
+scheduled, or wired to the production service**, and they make no Apple
+requests unless a future explicitly authorized, metered caller supplies a
+network callback:
+
+- `scripts/drive_batch_checkpoint.py` converts the tagged Go response
+  into the conservative `Path`, `Name`, `Size`, `ModTime`, `IsDir`,
+  and `ID` fields consumed by the original scanner. It requires a valid
+  Drive child ID and RFC3339 modification timestamp, enforces directory
+  ETags, size bounds, and safe nonrecursive names, and validates **every
+  folder in a batch before returning any records**. The pure
+  `plan_checkpoint()` creates a deep-copied, all-or-nothing tentative
+  checkpoint using the same pending/finished queue order and duplicate
+  directory/entry limits as the original walker. It never writes to disk
+  and never marks itself authorized for production.
+- `scripts/drive_batch_reader.py` holds a small in-memory converted batch
+  and satisfies the original `walk_resumable(reader=...)` callback
+  interface. The original walker remains responsible for atomic one-folder
+  checkpoint commits. The buffered reader rereads the current checkpoint
+  head before returning each folder, discards cached results when another
+  backup becomes active, sanitizes callback failures, and never advances
+  a checkpoint by itself. Its `verified_field_parity` gate is **False
+  by default**; nothing in the installed services enables it. The original
+  one-folder reader is still the fallback for a failed future batch run.
+- `scripts/drive_batch_parity.py` extends the initial identity check with
+  an independent, strict comparison against the ordinary rclone record
+  fields, including exact modification-time strings (without silently
+  truncating nanoseconds), directory IDs/ETags, file sizes, names,
+  paths and types. MIME types and other unmodeled rclone fields remain
+  explicitly **unverified**. This validator is pure and does not approve
+  production commits.
+
+**Offline tests added:** 39 new regression cases covering original walker
+queue parity, all-or-nothing planning, invalid metadata, changing backup
+state, private error sanitization, a simulation of a complete resumable
+scan, exact timestamp differences, and missing fields. The expected Python
+test count is now **419** (380 previously verified + 39 new). **These
+new tests have not yet run on the workstation.** They must pass before any
+live performance work proceeds.
+
+**Remaining gates before real batched checkpoint writes:** (1) reproduce
+the timestamp and core-field comparison against bounded live Apple/rclone
+samples, (2) audit missing MIME/other fields and any differences, (3)
+measure native-only vs legacy-only network traffic separately rather than
+assuming the combined 231 KB probe proves a saving, (4) implement a
+separate explicit root-metered batched resume worker with the same exclusive
+archive lock, permanent cumulative ledger and fail-closed stop behavior,
+(5) verify restart/fallback semantics and full-inventory finalization in
+that gated execution path. Neither native batch results nor this scaffold
+currently have permission to mutate the real checkpoint.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
