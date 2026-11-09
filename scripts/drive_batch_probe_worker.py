@@ -95,8 +95,18 @@ def probe_once(*, binary: Path = BINARY, state_root: Path = archive.STATE) -> di
                     require_core_fields=True)
         except comparison.BatchProbeDeferred:
             raise WorkerError('PROBE_BACKUP_BECAME_ACTIVE') from None
-        except (comparison.BatchProbeError, transport.BatchTransportError,
-                RcloneRCError):
+        except comparison.BatchProbeError as exc:
+            # BatchProbeError contains fixed, sanitized status codes only.
+            # Preserve core-parity mismatch separately from identity mismatch
+            # so the next troubleshooting step needs no raw Apple metadata.
+            code = str(exc)
+            if code in ('PROBE_CORE_FIELD_MISMATCH',
+                        'PROBE_METADATA_MISMATCH',
+                        'PROBE_NATIVE_READ_FAILED',
+                        'PROBE_LEGACY_READ_FAILED'):
+                raise WorkerError(code) from None
+            raise WorkerError('PROBE_COMPARE_FAILED') from None
+        except (transport.BatchTransportError, RcloneRCError):
             raise WorkerError('PROBE_COMPARE_FAILED') from None
         if hashlib.sha256(progress_path.read_bytes()).digest() != before:
             raise WorkerError('INVENTORY_CHECKPOINT_CHANGED')
