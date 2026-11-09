@@ -82,14 +82,18 @@ def read_receipt(directory: Path) -> dict:
         data = json.loads(path.read_bytes())
     except (OSError, ValueError, UnicodeError):
         raise ProbeMeterError('PROBE_EQUIVALENCE_RECEIPT_INVALID') from None
-    fields = {'version', 'equivalent', 'folders_matched',
-              'entries_matched', 'files_matched', 'directories_matched',
-              'checkpoint_writes', 'checkpoints_advanced'}
+    fields = {'version', 'equivalent', 'core_fields_verified',
+              'timestamps_verified', 'folders_matched', 'entries_matched',
+              'files_matched', 'directories_matched', 'checkpoint_writes',
+              'checkpoints_advanced'}
     if (not isinstance(data, dict) or set(data) != fields
-            or type(data['version']) is not int or data['version'] != 1
+            or type(data['version']) is not int or data['version'] != 2
             or data['equivalent'] is not True
+            or data['core_fields_verified'] is not True
+            or data['timestamps_verified'] is not True
             or any(type(data[key]) is not int for key in fields -
-                   {'version', 'equivalent'})
+                   {'version', 'equivalent', 'core_fields_verified',
+                    'timestamps_verified'})
             or not 1 <= data['folders_matched'] <= 2
             or not 0 <= data['entries_matched'] <= 1_000_000
             or not 0 <= data['files_matched'] <= data['entries_matched']
@@ -262,7 +266,8 @@ def execute() -> int:
                   f'entries={receipt["entries_matched"]}, '
                   f'files={receipt["files_matched"]}, '
                   f'dirs={receipt["directories_matched"]}, '
-                  'checkpoint_writes=0; verified by private worker receipt',
+                  'checkpoint_writes=0; core_fields_verified=yes; '
+                  'timestamps_verified=yes; verified by private worker receipt',
                   flush=True)
             print('PROBE_RESULT: worker completed and private '
                   'equivalence receipt validated; scanner unchanged',
