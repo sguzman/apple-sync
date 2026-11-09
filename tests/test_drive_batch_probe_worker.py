@@ -49,6 +49,8 @@ class ProbeWorkerTests(unittest.TestCase):
         with (patch.object(worker.archive, 'ROOT', self.root),
               patch.object(worker.inventory, 'load_progress',
                            return_value={'pending': ['test']}),
+              patch.object(worker.build_identity, 'verify_binary_identity',
+                           return_value='rclone v1.75.2'),
               patch.object(worker.diagnosis, 'backup_busy',
                            return_value=False),
               patch.object(worker, 'RcloneRCReader',
@@ -73,6 +75,8 @@ class ProbeWorkerTests(unittest.TestCase):
               patch.object(worker.archive, 'ROOT', self.root),
               patch.object(worker.diagnosis, 'backup_busy',
                            return_value=False),
+              patch.object(worker.build_identity, 'verify_binary_identity',
+                           return_value='rclone v1.75.2'),
               patch.object(worker.inventory, 'load_progress') as progress):
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             with self.assertRaisesRegex(worker.WorkerError, 'OTHER_APPLE_ARCHIVE_ACTIVE'):
@@ -82,6 +86,8 @@ class ProbeWorkerTests(unittest.TestCase):
     def test_busy_backup_never_reads_checkpoint_or_calls_rclone(self):
         with (patch.object(worker.diagnosis, 'backup_busy',
                            return_value=True),
+              patch.object(worker.build_identity, 'verify_binary_identity',
+                           return_value='rclone v1.75.2'),
               patch.object(worker.inventory, 'load_progress') as progress,
               patch.object(worker, 'RcloneRCReader') as daemon):
             with self.assertRaisesRegex(worker.WorkerError, 'BACKUP_ACTIVE'):
@@ -96,6 +102,8 @@ class ProbeWorkerTests(unittest.TestCase):
         with (patch.object(worker.archive, 'ROOT', self.root),
               patch.object(worker.inventory, 'load_progress', return_value={'pending': ['test']}),
               patch.object(worker.diagnosis, 'backup_busy', return_value=False),
+              patch.object(worker.build_identity, 'verify_binary_identity',
+                           return_value='rclone v1.75.2'),
               patch.object(worker, 'RcloneRCReader', return_value=self.fake_daemon()),
               patch.object(worker.comparison, 'compare_readonly', side_effect=mutate),
               self.assertRaisesRegex(worker.WorkerError, 'INVENTORY_CHECKPOINT_CHANGED')):
@@ -105,6 +113,14 @@ class ProbeWorkerTests(unittest.TestCase):
         self.binary.chmod(0o722)
         with self.assertRaisesRegex(worker.WorkerError, 'UNTRUSTED'):
             worker.validate_binary(self.binary)
+
+    def test_wrong_binary_identity_refused_before_rclone(self):
+        with (patch.object(worker.build_identity, 'verify_binary_identity',
+                           side_effect=worker.build_identity.BuildError('WRONG_TAG')),
+              patch.object(worker, 'RcloneRCReader') as daemon,
+              self.assertRaisesRegex(worker.WorkerError, 'IDENTITY_MISMATCH')):
+            worker.probe_once(binary=self.binary, state_root=self.state)
+        daemon.assert_not_called()
 
     def test_missing_or_symlinked_binary_rejected(self):
         symlink = self.root / 'alias'
