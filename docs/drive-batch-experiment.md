@@ -119,6 +119,40 @@ Before any Apple network experiment:
    exactly the existing checkpoint semantics, fail-closed rules and fallback
    to the unmodified one-folder reader.
 
+## Local acceptance sequence (no full scanner resume)
+
+**Step A — offline tests only.** After pulling the current branch, run
+`python3 -m unittest discover -s tests -q` and
+`python3 scripts/drive_metered.py status`. Current expected count is
+**374 tests**; confirm it from the actual workstation output. No Apple
+requests or system changes happen in this step.
+
+**Step B — deliberate static installation, only after tests pass.**
+The existing administrator-authorized `drive_metered.py install` installer
+now also deploys a third, separate
+`apple-sync-drive-batch-probe.service` and its root-owned controller.
+This needs the user's explicit Polkit action; installation alone does not
+start anything. The existing one- and eight-pass service definitions stay
+the same and no timers are enabled.
+
+**Step C — ONE deliberately metered live probe.** Only after Step B is
+confirmed, `python3 scripts/drive_batch_probe_launcher.py run` requests
+the exact static service using the start-only Polkit policy. The controller
+waits for backups to be idle, reserves the existing cumulative ledger,
+checks systemd IPAccounting, reads at most two pending folders once through
+the experimental API and once through ordinary rclone, and records only
+aggregate matching status and measured ingress/egress. It stops and
+accounts for worker traffic even on a comparison failure. It NEVER saves
+an inventory checkpoint. The sampled 1.5 MB cutoff is advisory and may
+overshoot. Never invoke the worker's `--execute` directly.
+
+**Step D — decide based on real data.** If equivalent, separately assess
+traffic efficiency (the first probe measures the **combined** native and
+legacy traffic, not their isolated costs), timestamp fidelity, and reliable
+retry behavior before enabling batches in a resumable scanner. If the
+comparison fails, leave the original scanner untouched and investigate
+without resetting saved progress or guessing away 1,420 folders.
+
 A full inventory is **not** complete simply because an API returns HTTP 200,
 a folder has a plausible number of children, or the Python tests pass.
 Never advance a pending folder merely because it appeared in a batch.
