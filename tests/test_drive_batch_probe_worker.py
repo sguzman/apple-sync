@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import io
+import json
 import os
 from pathlib import Path
 import sys
@@ -18,7 +19,8 @@ import drive_batch_probe_worker as worker
 def summary():
     return {'folders_matched': 2, 'entries_matched': 1,
             'files_matched': 1, 'directories_matched': 0,
-            'equivalent': True, 'checkpoint_writes': 0}
+            'equivalent': True, 'checkpoint_writes': 0,
+            'checkpoints_advanced': 0}
 
 
 class ProbeWorkerTests(unittest.TestCase):
@@ -137,6 +139,46 @@ class ProbeWorkerTests(unittest.TestCase):
             self.assertEqual(worker.main(), 0)
         probe.assert_not_called()
         self.assertIn('no Apple network requests', out.getvalue())
+
+    def test_private_receipt_writes_only_aggregate_metadata(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            directory.chmod(0o700)
+            worker.publish_receipt(summary(), directory=directory)
+            path = directory / worker.RECEIPT_NAME
+            result = json.loads(path.read_text())
+            self.assertEqual(result['version'], 1)
+            self.assertTrue(result['equivalent'])
+            self.assertEqual(result['folders_matched'], 2)
+            self.assertEqual(result['checkpoint_writes'], 0)
+            self.assertEqual(result['checkpoints_advanced'], 0)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertNotIn('Path', result)
+            self.assertNotIn('ID', result)
+            with self.assertRaises(FileExistsError):
+                worker.publish_receipt(summary(), directory=directory)
+
+    def test_invalid_receipt_result_does_not_write(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            directory.chmod(0o700)
+            malformed = summary()
+            malformed['checkpoint_writes'] = 1
+            with self.assertRaisesRegex(worker.WorkerError,
+                                        'INVALID_PROBE_COMPARISON_RESULT'):
+                worker.publish_receipt(malformed, directory=directory)
+            self.assertFalse((directory / worker.RECEIPT_NAME).exists())
+
+    def test_metered_worker_refuses_success_if_receipt_channel_missing(self):
+        with (patch.object(sys, 'argv', ['worker', '--execute']),
+              patch.object(worker.os, 'geteuid', return_value=1000),
+              patch.dict(os.environ, {
+                  'INVOCATION_ID': 'test', 'APPLE_SYNC_BATCH_METERED': '1'
+              }, clear=True),
+              patch.object(worker, 'probe_once', return_value=summary()),
+              contextlib.redirect_stderr(io.StringIO()) as err):
+            self.assertEqual(worker.main(), 2)
+        self.assertIn('PROBE_RESULT_CHANNEL_MISSING', err.getvalue())
 
     def test_execute_without_systemd_gate_refused(self):
         with (patch.object(sys, 'argv', ['worker', '--execute']),
