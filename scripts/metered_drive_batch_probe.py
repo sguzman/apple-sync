@@ -132,7 +132,10 @@ def read_failure_receipt(directory: Path) -> str:
     A failure receipt is never accepted as proof of metadata equivalence.
     """
     user = pwd.getpwnam(USER)
-    info = directory.lstat()
+    try:
+        info = directory.lstat()
+    except OSError:
+        raise ProbeMeterError('PROBE_FAILURE_RECEIPT_UNTRUSTED') from None
     if (not stat.S_ISDIR(info.st_mode) or info.st_uid != user.pw_uid
             or stat.S_IMODE(info.st_mode) != 0o700):
         raise ProbeMeterError('PROBE_FAILURE_RECEIPT_UNTRUSTED')
