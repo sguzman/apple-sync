@@ -85,7 +85,7 @@ class ReadOnlyComparisonTests(unittest.TestCase):
             listed = deepcopy(references(folder))
             listed[0]['ModTime'] = '2026-11-09T11:50:01Z'
             return listed
-        with self.assertRaisesRegex(probe.BatchProbeError, 'PROBE_CORE_FIELD_MISMATCH'):
+        with self.assertRaisesRegex(probe.BatchProbeError, 'PROBE_TIMESTAMP_MISMATCH'):
             probe.compare_readonly(
                 checkpoint(), read_native=replies, read_legacy=wrong_date,
                 backup_busy=lambda: False, require_core_fields=True)
@@ -99,10 +99,22 @@ class ReadOnlyComparisonTests(unittest.TestCase):
             listed = deepcopy(references(folder))
             listed[0].pop('ModTime')
             return listed
-        with self.assertRaisesRegex(probe.BatchProbeError, 'PROBE_CORE_FIELD_MISMATCH'):
+        with self.assertRaisesRegex(probe.BatchProbeError, 'PROBE_REFERENCE_CORE_FIELD_MISSING'):
             probe.compare_readonly(
                 checkpoint(), read_native=replies, read_legacy=incomplete,
                 backup_busy=lambda: False, require_core_fields=True)
+
+    def test_strict_mode_distinguishes_invalid_native_timestamp(self):
+        def invalid_native(batch):
+            native_reply = deepcopy(replies(batch))
+            native_reply[0]['items'][0].pop('dateModified')
+            return native_reply
+        with self.assertRaisesRegex(
+                probe.BatchProbeError, 'PROBE_NATIVE_CORE_METADATA_UNVERIFIED'):
+            probe.compare_readonly(
+                checkpoint(), read_native=invalid_native,
+                read_legacy=references, backup_busy=lambda: False,
+                require_core_fields=True)
 
     def test_invalid_core_mode_fails_before_remote_requests(self):
         fetched = Mock()
