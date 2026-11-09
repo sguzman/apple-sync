@@ -100,6 +100,47 @@ class RcloneRCInventoryTests(unittest.TestCase):
         self.assertNotIn('cat', seen[0])
         self.assertNotIn('copy', seen[0])
 
+    def test_experimental_binary_is_used_for_legacy_reference_client(self):
+        binary = '/private/verified-rclone-batch'
+        reader = rc.RcloneRCReader(Path('/ignored'), rclone_binary=binary)
+        reader.socket = Path('/tmp/unused-test-socket.sock')
+        reader.daemon = Mock()
+        reader.daemon.poll.return_value = None
+        commands = []
+        real_popen = subprocess.Popen
+        def fake_popen(command, **kwargs):
+            commands.append(command)
+            return real_popen([sys.executable, '-c',
+                               'import sys;sys.stdout.write(' +
+                               repr(json.dumps({'list': [entry()]})) + ')'],
+                              **kwargs)
+        with (patch.object(rc.subprocess, 'Popen', side_effect=fake_popen),
+              patch.object(rc.diagnosis, 'backup_busy', return_value=False)):
+            reader('Desktop', timeout=5)
+        self.assertEqual(commands[0][:2], [binary, 'rc'])
+        self.assertEqual(commands[0][4], 'operations/list')
+
+    def test_experimental_binary_is_used_for_private_rc_server(self):
+        binary = '/private/verified-rclone-batch'
+        seen = []
+        class FakeDaemon:
+            def poll(self):
+                return None
+            def terminate(self):
+                pass
+            def wait(self, timeout):
+                pass
+        def fake_popen(command, **_kw):
+            seen.append(command)
+            return FakeDaemon()
+        with tempfile.TemporaryDirectory() as directory:
+            with (patch.object(rc.subprocess, 'Popen', side_effect=fake_popen),
+                  patch.object(Path, 'is_socket', return_value=True)):
+                with rc.RcloneRCReader(Path(directory), rclone_binary=binary):
+                    pass
+        self.assertEqual(seen[0][:2], [binary, 'rcd'])
+        self.assertIn('--rc-no-auth', seen[0])
+
     def test_oversize_rc_output_is_refused_before_checkpoint(self):
         reader = rc.RcloneRCReader(Path('/ignored'), max_output=24)
         reader.socket = Path('/tmp/not-used-by-mock.sock')
