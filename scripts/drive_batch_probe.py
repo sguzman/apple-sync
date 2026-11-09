@@ -87,8 +87,14 @@ def compare_readonly(
             result = compare_core_fields(batch, raw, references)
         else:
             result = compare_with_legacy(batch, raw, references)
-    except BatchParityError:
-        raise BatchProbeError('PROBE_CORE_FIELD_MISMATCH') from None
+    except BatchParityError as exc:
+        safe = {
+            'BATCH_TIMESTAMP_MISMATCH': 'PROBE_TIMESTAMP_MISMATCH',
+            'BATCH_REFERENCE_FIELD_MISSING': 'PROBE_REFERENCE_CORE_FIELD_MISSING',
+            'BATCH_NATIVE_CORE_METADATA_UNVERIFIED':
+                'PROBE_NATIVE_CORE_METADATA_UNVERIFIED',
+        }.get(str(exc), 'PROBE_CORE_FIELD_MISMATCH')
+        raise BatchProbeError(safe) from None
     except (BatchEquivalenceError, BatchContractError):
         raise BatchProbeError('PROBE_METADATA_MISMATCH') from None
     require_idle()
