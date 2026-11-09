@@ -9,11 +9,15 @@ inventory checkpoint. Sampled IPAccounting is advisory, not a hard quota.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import json
 import os
 from pathlib import Path
 import pwd
 import re
+import stat
 import subprocess
+import tempfile
 import sys
 import time
 
@@ -31,7 +35,74 @@ class ProbeMeterError(Exception):
     """No raw private account identifiers or rclone errors."""
 
 
-def start_worker(unit: str) -> None:
+RECEIPT_NAME = 'result.json'
+MAX_RECEIPT_BYTES = 1024
+
+
+@contextmanager
+def receipt_directory():
+    """A fresh 0700 per-probe channel in the user's volatile runtime tree.
+
+    Never place comparison receipts in the archive or a shared world-readable
+    directory. A root controller can inspect and delete the file after the
+    transient worker cgroup has stopped and network bytes are accounted.
+    """
+    user = pwd.getpwnam(USER)
+    runtime = Path('/run/user') / str(user.pw_uid)
+    if runtime.is_symlink():
+        raise ProbeMeterError('PROBE_RUNTIME_DIRECTORY_UNTRUSTED')
+    info = runtime.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != user.pw_uid
+            or stat.S_IMODE(info.st_mode) != 0o700):
+        raise ProbeMeterError('PROBE_RUNTIME_DIRECTORY_UNTRUSTED')
+    with tempfile.TemporaryDirectory(
+            prefix='.apple-sync-batch-probe-', dir=runtime) as directory:
+        os.chown(directory, user.pw_uid, user.pw_gid)
+        os.chmod(directory, 0o700)
+        yield Path(directory)
+
+
+def read_receipt(directory: Path) -> dict:
+    """Accept only a complete, user-owned aggregate success attestation."""
+    user = pwd.getpwnam(USER)
+    info = directory.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != user.pw_uid
+            or stat.S_IMODE(info.st_mode) != 0o700):
+        raise ProbeMeterError('PROBE_RESULT_CHANNEL_UNTRUSTED')
+    path = directory / RECEIPT_NAME
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        raise ProbeMeterError('PROBE_EQUIVALENCE_RECEIPT_MISSING') from None
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != user.pw_uid
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_nlink != 1 or info.st_size > MAX_RECEIPT_BYTES):
+        raise ProbeMeterError('PROBE_EQUIVALENCE_RECEIPT_UNTRUSTED')
+    try:
+        data = json.loads(path.read_bytes())
+    except (OSError, ValueError, UnicodeError):
+        raise ProbeMeterError('PROBE_EQUIVALENCE_RECEIPT_INVALID') from None
+    fields = {'version', 'equivalent', 'folders_matched',
+              'entries_matched', 'files_matched', 'directories_matched',
+              'checkpoint_writes', 'checkpoints_advanced'}
+    if (not isinstance(data, dict) or set(data) != fields
+            or type(data['version']) is not int or data['version'] != 1
+            or data['equivalent'] is not True
+            or any(type(data[key]) is not int for key in fields -
+                   {'version', 'equivalent'})
+            or not 1 <= data['folders_matched'] <= 2
+            or not 0 <= data['entries_matched'] <= 1_000_000
+            or not 0 <= data['files_matched'] <= data['entries_matched']
+            or not 0 <= data['directories_matched'] <= data['entries_matched']
+            or data['files_matched'] + data['directories_matched']
+            != data['entries_matched']
+            or data['checkpoint_writes'] != 0
+            or data['checkpoints_advanced'] != 0):
+        raise ProbeMeterError('PROBE_EQUIVALENCE_RECEIPT_INVALID')
+    return data
+
+
+def start_worker(unit: str, *, receipt_dir: Path) -> None:
     user = pwd.getpwnam(USER)
     worker = REPO / 'scripts' / 'drive_batch_probe_worker.py'
     if not worker.is_file():
@@ -54,6 +125,9 @@ def start_worker(unit: str) -> None:
         '--setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/'
         + str(user.pw_uid) + '/bus',
         '--setenv=APPLE_SYNC_BATCH_METERED=1',
+        '--setenv=APPLE_SYNC_BATCH_RECEIPT_DIR=' + str(receipt_dir),
+        '--property=StandardOutput=journal',
+        '--property=StandardError=journal',
         '/usr/bin/python3', str(worker), '--execute',
     ]
     baseline.run(args, timeout=15)
@@ -81,7 +155,8 @@ def sanitized_worker_log(unit: str) -> None:
         print('PROBE_WORKER_LOG_UNAVAILABLE', flush=True)
 
 
-def metered_sample(unit: str, *, stop_at: int) -> tuple[int, int, int | None]:
+def metered_sample(unit: str, *, stop_at: int,
+                   receipt_dir: Path) -> tuple[int, int, int | None]:
     """Stop the whole user worker cgroup before recording the ledger."""
     largest_ingress = largest_egress = 0
     exit_status: int | None = None
@@ -89,7 +164,7 @@ def metered_sample(unit: str, *, stop_at: int) -> tuple[int, int, int | None]:
     last = {}
     start = time.monotonic()
     try:
-        start_worker(unit)
+        start_worker(unit, receipt_dir=receipt_dir)
         started = True
         while True:
             data = baseline.props(unit)
@@ -161,18 +236,37 @@ def execute() -> int:
               flush=True)
         # Durable reservation must precede any Apple network. Share the same
         # exclusive ledger as all ordinary inventory services.
-        ledger.begin(unit)
-        ingress, egress, exit_status = metered_sample(unit, stop_at=cutoff)
-        # Only after the entire worker cgroup has stopped.
-        ledger.complete(ingress, egress)
-        print(ledger.summary(), flush=True)
-        if exit_status != 0:
-            print('PROBE_RESULT: WORKER_FAILED_OR_INTERRUPTED; '
-                  'measured traffic committed; no checkpoint writes',
+        # This directory is outside the archive, and automatically removed.
+        # A service exit code alone cannot establish metadata equivalence.
+        with receipt_directory() as result_dir:
+            ledger.begin(unit)
+            ingress, egress, exit_status = metered_sample(
+                unit, stop_at=cutoff, receipt_dir=result_dir)
+            # Only after the entire worker cgroup has stopped.
+            ledger.complete(ingress, egress)
+            print(ledger.summary(), flush=True)
+            if exit_status != 0:
+                print('PROBE_RESULT: WORKER_FAILED_OR_INTERRUPTED; '
+                      'measured traffic committed; no checkpoint writes',
+                      flush=True)
+                return 2
+            try:
+                receipt = read_receipt(result_dir)
+            except ProbeMeterError as exc:
+                print('PROBE_RESULT: ' + str(exc) +
+                      '; measured traffic committed; equivalence NOT verified',
+                      flush=True)
+                return 2
+            print('PROBE_EQUIVALENCE: equivalent=yes, '
+                  f'folders={receipt["folders_matched"]}, '
+                  f'entries={receipt["entries_matched"]}, '
+                  f'files={receipt["files_matched"]}, '
+                  f'dirs={receipt["directories_matched"]}, '
+                  'checkpoint_writes=0; verified by private worker receipt',
                   flush=True)
-            return 2
-        print('PROBE_RESULT: worker finished; comparison is diagnostic only',
-              flush=True)
+            print('PROBE_RESULT: worker completed and private '
+                  'equivalence receipt validated; scanner unchanged',
+                  flush=True)
     return 0
 
 
