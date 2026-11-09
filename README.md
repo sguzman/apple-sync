@@ -645,9 +645,11 @@ root controller have now gained separate version-2 private failure receipts
 that report only allowlisted diagnostic codes **after** traffic is
 accounted for, without trusting transient journal delivery.
 **These new diagnostic changes have not been host-verified or installed.**
-Nine new offline tests bring the expected total to **435**; repeat
+Ten new offline tests bring the expected total to **436**; repeat
 neither the failed Apple probe nor the inventory scan before validating
-the code and making a separate explicit decision.
+the code and making a separate explicit decision. The strict probe also
+distinguishes timestamp mismatches, missing reference fields, and invalid
+native metadata using fixed privacy-safe reason codes.
 
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
