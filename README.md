@@ -617,12 +617,24 @@ compatible with the original `walk_resumable` interface, disabled unless
 a separate field-parity gate is explicitly satisfied; and
 `scripts/drive_batch_parity.py` strictly compares conversion output with
 ordinary rclone fields, including exact timestamps. A total of **39 new
-offline tests** were added, bringing the expected total to **419**, but
-these tests still require workstation verification. The new modules have
+offline tests** were added, bringing the total to **419**;
+all 419 passed on the workstation on November 9, 2026. Seven more
+offline tests now cover strict live timestamp/core-field parity and a
+version-2 private receipt; the expected total is **426**, not yet verified
+on the workstation. The new modules have
 **not** been deployed into the root-metered services and make no Apple
 requests on their own. This scaffold does **not** yet have authority to
 commit the remaining folder checkpoints. More live field-parity and
 per-reader bandwidth evidence is needed before enabling it.
+
+The manual, metered two-folder probe has now gained a stricter
+read-only mode that compares exactly the `Path`, `Name`, `Size`,
+`ModTime`, `IsDir` and `ID` fields and requires a validated **version-2
+receipt** with both timestamp and core-field proof flags. A mismatch
+fails closed with a sanitized status; identity-only success can no longer
+be mistaken for this stronger acceptance result. **The updated controller
+has not been installed and this stricter comparison has not been run against
+Apple.** The production scanner remains unchanged.
 
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
