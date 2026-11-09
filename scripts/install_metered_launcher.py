@@ -21,11 +21,15 @@ SOURCE = Path('/home/sguzman/Code/Sync/apple-sync')
 LIBEXEC = Path('/usr/local/libexec/apple-sync-drive-metered')
 UNIT = Path('/etc/systemd/system/apple-sync-drive-metered-manual.service')
 SINGLE_UNIT = Path('/etc/systemd/system/apple-sync-drive-metered-single.service')
+PROBE_UNIT = Path('/etc/systemd/system/apple-sync-drive-batch-probe.service')
 RULE = Path('/etc/polkit-1/rules.d/49-apple-sync-drive-metered.rules')
 COPIES = (
     ('scripts/metered_drive_inventory_trial.py',
      LIBEXEC / 'metered_drive_inventory_trial.py'),
     ('scripts/drive_meter_budget.py', LIBEXEC / 'drive_meter_budget.py'),
+    ('scripts/metered_drive_batch_probe.py',
+     LIBEXEC / 'metered_drive_batch_probe.py'),
+    ('packaging/apple-sync-drive-batch-probe.service', PROBE_UNIT),
     ('packaging/apple-sync-drive-metered-manual.service', UNIT),
     ('packaging/apple-sync-drive-metered-single.service', SINGLE_UNIT),
     ('packaging/49-apple-sync-drive-metered.rules', RULE),
@@ -86,7 +90,7 @@ def install() -> None:
         raise InstallationError('SOURCE_REPOSITORY_UNAVAILABLE')
     if not shutil.which('systemctl') or not shutil.which('runuser'):
         raise InstallationError('SYSTEMD_OR_RUNUSER_MISSING')
-    for service in (UNIT, SINGLE_UNIT):
+    for service in (UNIT, SINGLE_UNIT, PROBE_UNIT):
         state = subprocess.run(
             ['systemctl', 'show', service.name, '--property=ActiveState',
              '--value'],
@@ -97,7 +101,7 @@ def install() -> None:
     for rel, dest in COPIES:
         atomic_install(SOURCE / rel, dest)
     subprocess.run(['systemctl', 'daemon-reload'], check=True, timeout=20)
-    for service in (UNIT, SINGLE_UNIT):
+    for service in (UNIT, SINGLE_UNIT, PROBE_UNIT):
         enabled = subprocess.run(
             ['systemctl', 'is-enabled', service.name],
             capture_output=True, text=True, check=False, timeout=10)
@@ -105,7 +109,7 @@ def install() -> None:
                 'enabled', 'enabled-runtime', 'linked', 'linked-runtime'):
             raise InstallationError('MANUAL_SERVICE_UNEXPECTEDLY_ENABLED')
     print('MANUAL_METERED_LAUNCHER_INSTALLED: static service, not enabled')
-    print('Polkit permission: active local user may start either fixed manual service')
+    print('Polkit permission: active local user may start fixed manual services only')
     print('No inventory scan, backup job, or timer was started or changed')
 
 
