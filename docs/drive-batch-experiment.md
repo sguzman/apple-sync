@@ -147,11 +147,42 @@ secrets, folder names or Drive identifiers are written. Transient systemd
 stdout/stderr are also explicitly sent to the journal for supplementary
 diagnostics; journal delivery is no longer the proof channel.
 
-These changes are **not yet tested on the user's workstation or reinstalled
-in the root-owned controller**. Do not start a second live probe until
-the updated test suite passes and a separate explicit installer invocation
-refreshes the static service controller. They do not alter the existing
-one-/eight-pass scanner definitions.
+The updated worker/controller passed **380 Python tests** on the workstation,
+and the user reinstalled the root-owned controller through the existing
+Polkit installer before the second probe. The existing one-/eight-pass
+scanner definitions remained unchanged.
+
+## Live probe #2: verified metadata equivalence (2026-11-09)
+
+The second explicitly authorized, manual-only probe returned a root-controller
+journal line from its **validated private worker receipt**:
+
+`PROBE_EQUIVALENCE: equivalent=yes, folders=2, entries=12, files=10,
+dirs=2, checkpoint_writes=0; verified by private worker receipt`
+
+The service separately reported `PROBE_RESULT: worker completed and private
+equivalence receipt validated; scanner unchanged`. The sampled IPAccounting
+totals were **180,120 ingress + 50,907 egress = 231,027 bytes**. The shared
+ledger has **51,723,581 bytes used**, **48,276,419 bytes remaining**,
+**68 completed passes**, and **pending=no**. The checkpoint is still
+**1,606 completed folders, 1,420 pending, 10,455 records**.
+
+This is a valid end-to-end **identity and limited metadata equivalence**
+result for the two sampled folders: IDs, names, types, directory ETags,
+and file sizes agree with ordinary listings. It does **not** prove timestamps,
+full-tree completeness, or whether the batched reader is faster or cheaper.
+The 231,027-byte figure is the **combined native+reference+daemon traffic**
+for the probe; there is no trustworthy per-method cost attribution. No
+additional probe is automatically authorized by these results.
+
+**Next engineering milestone:** offline integration design and regression
+tests for a *separate, explicitly gated* resumable batch listing path.
+Retain original scanner as fallback and preserve the existing budget,
+archive lock, pending/finished ordering, metadata contract, and checkpoint
+atomicity. Before granting the batch reader authority to commit folders,
+require an appropriately bounded live pilot and acceptance of timestamp and
+per-reader bandwidth uncertainties. Do not enable existing timers or
+modify installed rclone by default.
 
 ## Local acceptance sequence (no full scanner resume)
 
