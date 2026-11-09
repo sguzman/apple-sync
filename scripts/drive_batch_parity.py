@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""Pure parity audit for converting Apple batch metadata into rclone records.
+
+The first live probe proved IDs, names, types, ETags and sizes matched on a
+two-folder sample. This stricter offline gate additionally compares ModTime
+and Name to independently read rclone entries. It never writes a checkpoint
+or performs network calls. Unmodeled fields remain explicitly unverified.
+"""
+from __future__ import annotations
+
+from drive_batch_checkpoint import (BatchCheckpointError,
+                                    convert_batch, valid_timestamp)
+from drive_batch_equivalence import (BatchEquivalenceError,
+                                     compare_with_legacy)
+
+CORE_FIELDS = frozenset(('Path', 'Name', 'Size', 'ModTime', 'IsDir', 'ID'))
+
+
+class BatchParityError(Exception):
+    """Fixed privacy-safe failure; never reveal private cloud metadata."""
+
+
+def compare_core_fields(
+        batch: list[tuple[str, str]], native: object,
+        references: list[tuple[str, list[dict]]]) -> dict:
+    """Require the same fields on all records before approving field parity.
+
+    This is intentionally stricter than the first two-folder identity probe.
+    It compares the exact RFC3339 timestamp string, without silently
+    discarding nanoseconds or offset information. If the two rclone paths
+    serialize equivalent time instants differently, defer adoption until
+    that difference can be explained and tested.
+    """
+    try:
+        identity = compare_with_legacy(batch, native, references)
+        converted = convert_batch(batch, native)
+        if (not isinstance(references, list) or
+                len(references) != len(converted)):
+            raise BatchParityError('BATCH_REFERENCE_FOLDERS_MISSING')
+        reference_by_folder = {}
+        for folder, entries in references:
+            if (not isinstance(folder, str) or folder in reference_by_folder
+                    or not isinstance(entries, list)):
+                raise BatchParityError('BATCH_REFERENCE_FOLDERS_INVALID')
+            reference_by_folder[folder] = entries
+        if set(reference_by_folder) != {name for name, _ in converted}:
+            raise BatchParityError('BATCH_REFERENCE_FOLDER_SET_MISMATCH')
+        checked = 0
+        for folder, records in converted:
+            source = reference_by_folder[folder]
+            if len(source) != len(records):
+                raise BatchParityError('BATCH_REFERENCE_COUNT_MISMATCH')
+            native_by_id = {row['ID']: row for row in records}
+            if len(native_by_id) != len(records):
+                raise BatchParityError('BATCH_DUPLICATE_CONVERTED_ID')
+            observed_ids = set()
+            for row in source:
+                if not isinstance(row, dict) or not CORE_FIELDS <= row.keys():
+                    raise BatchParityError('BATCH_REFERENCE_FIELD_MISSING')
+                if row['ID'] in observed_ids:
+                    raise BatchParityError('BATCH_DUPLICATE_REFERENCE_ID')
+                observed_ids.add(row['ID'])
+                expected = native_by_id.get(row['ID'])
+                if expected is None:
+                    raise BatchParityError('BATCH_REFERENCE_ID_MISMATCH')
+                if (not valid_timestamp(row['ModTime']) or
+                        any(type(row[key]) is not type(expected[key])
+                            or row[key] != expected[key] for key in CORE_FIELDS)):
+                    raise BatchParityError('BATCH_CORE_FIELD_MISMATCH')
+                checked += 1
+            if observed_ids != set(native_by_id):
+                raise BatchParityError('BATCH_REFERENCE_INCOMPLETE')
+        if checked != identity['entries_matched']:
+            raise BatchParityError('BATCH_CORE_COUNT_MISMATCH')
+    except (BatchCheckpointError, BatchEquivalenceError, TypeError,
+            ValueError, KeyError, AttributeError):
+        raise BatchParityError('BATCH_CORE_PARITY_UNVERIFIED') from None
+    return {
+        'folders_matched': identity['folders_matched'],
+        'entries_matched': checked,
+        'files_matched': identity['files_matched'],
+        'directories_matched': identity['directories_matched'],
+        'identity_verified': True,
+        'core_fields_verified': True,
+        'timestamps_verified': True,
+        'mime_types_verified': False,
+        'unmodeled_fields_verified': False,
+        'checkpoint_writes': 0,
+        'production_commit_authorized': False,
+    }
