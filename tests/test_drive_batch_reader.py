@@ -154,6 +154,23 @@ class BufferedBatchTests(unittest.TestCase):
                 current('A', timeout=20)
             calls.assert_not_called()
 
+    def test_busy_transition_discards_cached_second_folder(self):
+        state = progress()
+        observed = [False, False, True]
+        def busy():
+            return observed.pop(0) if observed else True
+        current = reader.BufferedBatchReader(
+            load_checkpoint=lambda: state,
+            read_native=lambda req, **kw: response(req),
+            backup_busy=busy, size=2, verified_field_parity=True)
+        self.assertEqual(len(current('A', timeout=20)), 2)
+        self.assertEqual(len(current.buffer), 1)
+        state['pending'] = ['B', 'A/new']
+        state['finished'].append('A')
+        with self.assertRaises(inventory.InventoryDeferred):
+            current('B', timeout=20)
+        self.assertEqual(current.buffer, [])
+
     def test_callback_mutation_cannot_modify_request_validation(self):
         original = progress()
         def attack(batch, **_kw):
