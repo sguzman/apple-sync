@@ -285,6 +285,129 @@ class MeteredProbeTests(unittest.TestCase):
         self.assertEqual(ledger.measured, (123, 45))
         self.assertIn('equivalence NOT verified', out.getvalue())
 
+    def test_private_failure_receipt_recovers_specific_reason(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            directory.chmod(0o700)
+            receipt = {
+                'version': 2, 'outcome': 'failed',
+                'code': 'PROBE_CORE_FIELD_MISMATCH',
+                'checkpoint_writes': 0,
+            }
+            path = directory / controller.RECEIPT_NAME
+            path.write_text(json.dumps(receipt))
+            path.chmod(0o600)
+            user = Mock(pw_uid=os.getuid(), pw_gid=os.getgid())
+            with patch.object(controller.pwd, 'getpwnam', return_value=user):
+                self.assertEqual(controller.read_failure_receipt(directory),
+                                 'PROBE_CORE_FIELD_MISMATCH')
+                with self.assertRaises(controller.ProbeMeterError):
+                    controller.read_receipt(directory)
+
+    def test_failure_receipt_rejects_injected_data_or_unsafe_permissions(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            directory.chmod(0o700)
+            path = directory / controller.RECEIPT_NAME
+            user = Mock(pw_uid=os.getuid(), pw_gid=os.getgid())
+            with patch.object(controller.pwd, 'getpwnam', return_value=user):
+                with self.assertRaisesRegex(controller.ProbeMeterError,
+                                            'RECEIPT_MISSING'):
+                    controller.read_failure_receipt(directory)
+                for code in ('/private/secret', 'PRIVATE_FOLDER_NAME',
+                             'PROBE_COMPARE_FAILED; secret'):
+                    path.write_text(json.dumps({
+                        'version': 2, 'outcome': 'failed', 'code': code,
+                        'checkpoint_writes': 0,
+                    }))
+                    path.chmod(0o600)
+                    with self.subTest(code=code), self.assertRaisesRegex(
+                            controller.ProbeMeterError, 'RECEIPT_INVALID'):
+                        controller.read_failure_receipt(directory)
+                path.write_text(json.dumps({
+                    'version': 2, 'outcome': 'failed',
+                    'code': 'PROBE_CORE_FIELD_MISMATCH',
+                    'checkpoint_writes': 0,
+                }))
+                path.chmod(0o644)
+                with self.assertRaisesRegex(controller.ProbeMeterError,
+                                            'RECEIPT_UNTRUSTED'):
+                    controller.read_failure_receipt(directory)
+
+    def test_worker_failure_reason_printed_only_after_traffic_committed(self):
+        events = []
+        class Ledger:
+            remaining = 10_000_000
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                pass
+            def check_ready(self):
+                pass
+            def begin(self, *_args):
+                events.append('begin')
+            def complete(self, ingress, egress):
+                events.append('complete')
+                self.measured = (ingress, egress)
+            def summary(self):
+                return 'safe'
+        ledger = Ledger()
+        def recover(_directory):
+            self.assertEqual(ledger.measured, (123, 45))
+            events.append('failure_receipt')
+            return 'PROBE_CORE_FIELD_MISMATCH'
+        with (patch.object(controller.baseline, 'guard_setup'),
+              patch.object(controller.baseline, 'wait_for_idle_window',
+                           return_value=True),
+              patch.object(controller.baseline, 'preflight'),
+              patch.object(controller, 'BudgetLedger', return_value=ledger),
+              patch.object(controller, 'receipt_directory',
+                           return_value=contextlib.nullcontext(Path('/tmp/fake'))),
+              patch.object(controller, 'metered_sample',
+                           return_value=(123, 45, 2)),
+              patch.object(controller, 'read_failure_receipt',
+                           side_effect=recover),
+              patch.object(controller, 'read_receipt') as read_success,
+              contextlib.redirect_stdout(io.StringIO()) as output):
+            self.assertEqual(controller.execute(), 2)
+        self.assertEqual(events, ['begin', 'complete', 'failure_receipt'])
+        read_success.assert_not_called()
+        self.assertIn('PROBE_FAILED: PROBE_CORE_FIELD_MISMATCH',
+                      output.getvalue())
+        self.assertNotIn('PROBE_EQUIVALENCE: equivalent=yes',
+                         output.getvalue())
+
+    def test_missing_failure_receipt_reports_unavailable_not_success(self):
+        class Ledger:
+            remaining = 10_000_000
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                pass
+            def check_ready(self):
+                pass
+            def begin(self, *_args):
+                pass
+            def complete(self, *_args):
+                pass
+            def summary(self):
+                return 'safe'
+        with (patch.object(controller.baseline, 'guard_setup'),
+              patch.object(controller.baseline, 'wait_for_idle_window',
+                           return_value=True),
+              patch.object(controller.baseline, 'preflight'),
+              patch.object(controller, 'BudgetLedger', return_value=Ledger()),
+              patch.object(controller, 'receipt_directory',
+                           return_value=contextlib.nullcontext(Path('/tmp/fake'))),
+              patch.object(controller, 'metered_sample', return_value=(0, 0, 2)),
+              patch.object(controller, 'read_failure_receipt',
+                           side_effect=controller.ProbeMeterError(
+                               'PROBE_FAILURE_RECEIPT_MISSING')),
+              contextlib.redirect_stdout(io.StringIO()) as output):
+            self.assertEqual(controller.execute(), 2)
+        self.assertIn('WORKER_REASON_UNAVAILABLE', output.getvalue())
+        self.assertNotIn('equivalent=yes', output.getvalue())
+
     def test_logs_never_relay_arbitrary_remote_paths(self):
         raw = ('Sensitive folder FOLDER::private::secret\n'
                'PROBE_FAILED: PROBE_COMPARE_FAILED\n'
