@@ -636,6 +636,19 @@ be mistaken for this stronger acceptance result. **The updated controller
 has not been installed and this stricter comparison has not been run against
 Apple.** The production scanner remains unchanged.
 
+A stricter read-only probe run on November 9, 2026 exited with status
+2 after **228,818 measured bytes**. The system journal lost the worker's
+specific failure code, so **the cause is still unknown**; do not treat it
+as a proved timestamp mismatch. The ledger reconciled to **48,047,601
+bytes remaining**, and the checkpoint stayed unchanged. The worker and
+root controller have now gained separate version-2 private failure receipts
+that report only allowlisted diagnostic codes **after** traffic is
+accounted for, without trusting transient journal delivery.
+**These new diagnostic changes have not been host-verified or installed.**
+Nine new offline tests bring the expected total to **435**; repeat
+neither the failed Apple probe nor the inventory scan before validating
+the code and making a separate explicit decision.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
