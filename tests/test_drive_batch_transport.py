@@ -70,6 +70,21 @@ class SocketTests(unittest.TestCase):
                                 'arg': [ID], 'opt': {}})
         self.assertNotIn(b'folder123', first)
 
+    def test_native_reply_retains_folder_envelopes_for_comparison(self):
+        raw = transport.fetch_batch_native(self.sock, [('private/folder', ID)])
+        self.assertEqual(raw, success_response()['result'])
+        self.assertEqual(raw[0]['directChildrenCount'], 1)
+        self.assertEqual(len(self.server.requests), 1)
+
+    def test_native_reply_rejects_incomplete_folder_without_leakage(self):
+        incomplete = success_response()
+        incomplete['result'][0]['directChildrenCount'] = 3
+        self.server.output = (200, incomplete)
+        with self.assertRaisesRegex(transport.BatchTransportError,
+                                    'INVALID_BATCH_RC_RESPONSE') as caught:
+            transport.fetch_batch_native(self.sock, [('private/folder', ID)])
+        self.assertNotIn('folder123', str(caught.exception))
+
     def test_refuses_non_200_response_without_raw_error(self):
         self.server.output = (403, {'error': 'private folder token'})
         with self.assertRaises(transport.BatchTransportError) as caught:
