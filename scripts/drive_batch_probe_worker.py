@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import hashlib
+import json
 import os
 from pathlib import Path
 import stat
@@ -101,6 +102,50 @@ def probe_once(*, binary: Path = BINARY, state_root: Path = archive.STATE) -> di
     return result
 
 
+RECEIPT_NAME = 'result.json'
+MAX_RECEIPT_BYTES = 1024
+
+
+def publish_receipt(result: dict, *, directory: Path) -> None:
+    """Give the metered controller a private, explicit equivalence verdict.
+
+    Journald delivery is not reliable enough to prove that comparison ran.
+    The controller accepts this receipt only with a successful worker exit.
+    No raw Apple metadata, folder names or identifiers are written.
+    """
+    fields = ('folders_matched', 'entries_matched', 'files_matched',
+              'directories_matched', 'checkpoint_writes',
+              'checkpoints_advanced')
+    if (not isinstance(result, dict) or result.get('equivalent') is not True
+            or any(type(result.get(key)) is not int for key in fields)
+            or not 1 <= result['folders_matched'] <= MAX_FOLDERS
+            or not 0 <= result['entries_matched'] <= 1_000_000
+            or not 0 <= result['files_matched'] <= result['entries_matched']
+            or not 0 <= result['directories_matched'] <= result['entries_matched']
+            or result['files_matched'] + result['directories_matched']
+            != result['entries_matched']
+            or result['checkpoint_writes'] != 0
+            or result['checkpoints_advanced'] != 0):
+        raise WorkerError('INVALID_PROBE_COMPARISON_RESULT')
+    if not directory.is_absolute() or directory.is_symlink():
+        raise WorkerError('PROBE_RESULT_CHANNEL_UNTRUSTED')
+    info = directory.stat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o700):
+        raise WorkerError('PROBE_RESULT_CHANNEL_UNTRUSTED')
+    receipt = {'version': 1, 'equivalent': True}
+    receipt.update({key: result[key] for key in fields})
+    payload = (json.dumps(receipt, sort_keys=True) + '\n').encode('ascii')
+    if len(payload) > MAX_RECEIPT_BYTES:
+        raise WorkerError('PROBE_RESULT_TOO_LARGE')
+    fd = os.open(directory / RECEIPT_NAME,
+                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'wb') as output:
+        output.write(payload)
+        output.flush()
+        os.fsync(output.fileno())
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--execute', action='store_true',
@@ -117,6 +162,10 @@ def main() -> int:
         return 2
     try:
         result = probe_once()
+        receipt_dir = os.environ.get('APPLE_SYNC_BATCH_RECEIPT_DIR')
+        if not receipt_dir:
+            raise WorkerError('PROBE_RESULT_CHANNEL_MISSING')
+        publish_receipt(result, directory=Path(receipt_dir))
     except (WorkerError, inventory.InventoryError, OSError) as exc:
         category = str(exc) if isinstance(exc, WorkerError) else 'LOCAL_CHECK_FAILED'
         print('PROBE_FAILED: ' + category, file=sys.stderr, flush=True)
