@@ -171,8 +171,8 @@ class MeteredProbeTests(unittest.TestCase):
         stopped.assert_called_once()
 
     def test_logs_never_relay_arbitrary_remote_paths(self):
-        raw = ('Sensitive folder FOLDER::private::secret\\n'
-               'PROBE_FAILED: PROBE_COMPARE_FAILED\\n'
+        raw = ('Sensitive folder FOLDER::private::secret\n'
+               'PROBE_FAILED: PROBE_COMPARE_FAILED\n'
                'PROBE_EQUIVALENCE: equivalent=yes, folders=2, entries=3, '
                'files=2, dirs=1, checkpoint_writes=0; bandwidth '
                'evaluated by root ledger separately')
