@@ -1,8 +1,8 @@
 # Experimental batched iCloud Drive metadata transport
 
-Status: **experimental binary compiled and verified; live batch testing
-not enabled**. This remains an isolated performance experiment, not a new
-backup mode. The existing one-pass metered scanner is unchanged and continues
+Status: **isolated binary built; two-folder identity probe verified;
+stricter timestamp/core-field probe awaiting offline and live verification**.
+This remains a manually metered experiment, not a new backup mode. The existing one-pass metered scanner is unchanged and continues
 to use its original persistent rclone RC reader and saved checkpoint.
 
 ## Why this is possible
@@ -223,9 +223,10 @@ network callback:
 queue parity, all-or-nothing planning, invalid metadata, changing backup
 state, private error sanitization, a simulation of a complete resumable
 scan, exact timestamp differences, and missing fields. The expected Python
-test count is now **419** (380 previously verified + 39 new). **These
-new tests have not yet run on the workstation.** They must pass before any
-live performance work proceeds.
+test count reached **419** (380 previously verified + 39 new), and
+**all 419 passed on the workstation on November 9, 2026**. Seven further
+offline tests now cover the strict live parity mode and its versioned
+result receipt; they still require host verification.
 
 **Remaining gates before real batched checkpoint writes:** (1) reproduce
 the timestamp and core-field comparison against bounded live Apple/rclone
@@ -238,12 +239,44 @@ archive lock, permanent cumulative ledger and fail-closed stop behavior,
 that gated execution path. Neither native batch results nor this scaffold
 currently have permission to mutate the real checkpoint.
 
+## Next gate: strict live core-field parity (2026-11-09)
+
+The first real two-folder probe proved IDs, names, object types, ETags and
+sizes, but did not compare modification timestamps. The new
+`compare_readonly(..., require_core_fields=True)` path now uses
+`drive_batch_parity.compare_core_fields` on **the same two read-only
+native and ordinary reference listings**. It rejects missing or unequal
+`Path`, `Name`, `Size`, `ModTime`, `IsDir` or `ID` values, even
+if the prior identity check would have passed. Rclone timestamp strings
+must be exactly equal; offset or precision differences fail closed.
+
+The manual two-folder worker now requests strict validation explicitly.
+It writes a **version-2** private result receipt only when the entire
+comparison succeeds and both `core_fields_verified` and
+`timestamps_verified` are true. The root-metered controller checks
+these two proof flags and refuses an older identity-only receipt, even
+when the worker exited zero. Its read-only journal output explicitly
+reports both flags or a fixed sanitized error code, never private
+names or identifiers. The old `rclone` binary and production scanner
+remain untouched.
+
+**Verification pending:** 7 new regression tests are committed, raising
+the expected total from the last workstation-verified **419 to 426**.
+No host test of these changes has occurred yet, the updated root
+controller has **not** been reinstalled, and no further live Apple
+request has been made or authorized. First run the offline test suite.
+Only after a separately approved installation and manual metered run
+should the stricter fields be considered actually validated.
+Even a strict success would not establish a batch-only bandwidth saving,
+full field fidelity beyond the six core fields, or permission to
+write the production checkpoint.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
 `python3 -m unittest discover -s tests -q` and
 `python3 scripts/drive_metered.py status`. Current expected count is
-**380 tests**; confirm it from the actual workstation output. No Apple
+**426 tests**; confirm it from the actual workstation output. No Apple
 requests or system changes happen in this step.
 
 **Step B — deliberate static installation, only after tests pass.**
