@@ -1,9 +1,9 @@
 # Experimental batched iCloud Drive metadata transport
 
-Status: **offline implementation only; live Apple use is not authorized or
-integrated**. This is an isolated performance experiment, not a new backup
-mode. The existing one-pass metered service continues to use the original
-persistent rclone RC reader and saved checkpoint.
+Status: **experimental binary compiled and verified; live batch testing
+not enabled**. This remains an isolated performance experiment, not a new
+backup mode. The existing one-pass metered scanner is unchanged and continues
+to use its original persistent rclone RC reader and saved checkpoint.
 
 ## Why this is possible
 
@@ -31,8 +31,21 @@ upstream source.
 - `scripts/drive_batch_transport.py` sends the fixed backend command in
   JSON over an already running, user-private 0700 Unix socket. IDs stay out
   of process arguments and URLs. Responses are capped at 8 MiB; request
-  size is capped at 16 KiB and timeout at 30 seconds. It never starts rclone,
-  bypasses the budget, or mutates archive state.
+  size is capped at 16 KiB and timeout at 30 seconds. It now offers a raw
+  native-envelope result (after validating the whole batch), needed for an
+  independent per-folder comparison. It never starts rclone, bypasses the
+  budget, or mutates archive state.
+- `scripts/drive_batch_probe.py` is a **pure, offline orchestration function**:
+  it selects at most two pending IDs, asks injected callbacks for one native
+  batch and ordinary nonrecursive rclone reference listings, and rejects any
+  difference in the identity/name/type/ETag/size checks already implemented.
+  It refuses to continue on any active or uncertain backup status. No CLI,
+  Apple requests, file writes, or systemd service are exposed by this module.
+- `scripts/drive_inventory_rc.py` retains `rclone` as the scanner default
+  and accepts an optional verified experimental binary when called by a future
+  isolated comparison worker. Its private daemon and legacy listing client
+  then use the same binary. This change does not enable a new reader in the
+  installed service.
 
 ## Deliberate isolation and release gates
 
@@ -44,11 +57,13 @@ optional `fs.Commander` implementations, adding the file inside a matching
 upstream `backend/iclouddrive` package should advertise the command without
 editing rclone's existing source.
 
-**This Go addon has not yet been compiled against a pinned local rclone
-checkout.** Avoid claiming Go tests or source compatibility until that build
-and test are actually run. We have not verified Apple's live batch response,
-pagination, returned child count, response ordering, metadata equivalence,
-network efficiency, or error semantics.
+**The experimental Go addon and standalone rclone v1.75.2 binary
+successfully compiled and passed tag/module/version checks on the
+workstation on November 8, 2026.** All 334 Python tests passed at that
+checkpoint. New probe-oriented Python changes committed since then have
+not yet been locally rerun. Apple's live batch response, pagination,
+returned child count, ordering, metadata equivalence, network efficiency
+and error semantics still have not been verified.
 
 Before any Apple network experiment:
 
@@ -67,10 +82,12 @@ Before any Apple network experiment:
    and Go modules but makes no Apple requests. Reject any upstream API
    differences instead of adapting blindly. Never treat a successful build
    as authorization to scan.
-3. Implement a new, deliberately opt-in system-metered probe with the existing
-   exclusive backup lock, backup-idle checks, root-owned ledger, soft bandwidth
-   cutoff and no checkpoint writes. The existing manual one/eight-pass service
-   files must not change implicitly.
+3. The offline two-folder comparison core is now implemented.
+   Implement a **new, deliberately opt-in system-metered probe controller**
+   with the existing exclusive backup lock, backup-idle checks, root-owned
+   ledger, soft bandwidth cutoff and no checkpoint writes. **That privileged
+   controller is not yet implemented or installed.** The existing manual
+   one/eight-pass service files must not change implicitly.
 4. Compare *the same one or two folders* with the current rclone reader and
    the batch command in one bounded measured window. Do not log raw names,
    paths, IDs, account data or Apple errors. Explicitly report incompleteness
