@@ -54,13 +54,13 @@ class CoreParityTests(unittest.TestCase):
     def test_one_nanosecond_difference_fails_closed(self):
         legacy = references()
         legacy[0][1][0]['ModTime'] = '2026-11-09T11:50:00.123456788Z'
-        with self.assertRaisesRegex(parity.BatchParityError, 'CORE_FIELD_MISMATCH'):
+        with self.assertRaisesRegex(parity.BatchParityError, 'TIMESTAMP_MISMATCH'):
             parity.compare_core_fields(REQUEST, response(), legacy)
 
     def test_equivalent_time_with_different_timezone_still_needs_review(self):
         legacy = references()
         legacy[0][1][1]['ModTime'] = '2026-11-09T05:50:00.123456789-06:00'
-        with self.assertRaisesRegex(parity.BatchParityError, 'CORE_FIELD_MISMATCH'):
+        with self.assertRaisesRegex(parity.BatchParityError, 'TIMESTAMP_MISMATCH'):
             parity.compare_core_fields(REQUEST, response(), legacy)
 
     def test_missing_modtime_or_name_is_rejected(self):
