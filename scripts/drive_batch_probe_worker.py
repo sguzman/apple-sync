@@ -91,7 +91,8 @@ def probe_once(*, binary: Path = BINARY, state_root: Path = archive.STATE) -> di
                         rc.socket, batch, timeout=BATCH_SECONDS),
                     read_legacy=lambda folder: rc(folder,
                                                     timeout=REFERENCE_SECONDS),
-                    backup_busy=diagnosis.backup_busy)
+                    backup_busy=diagnosis.backup_busy,
+                    require_core_fields=True)
         except comparison.BatchProbeDeferred:
             raise WorkerError('PROBE_BACKUP_BECAME_ACTIVE') from None
         except (comparison.BatchProbeError, transport.BatchTransportError,
@@ -116,8 +117,10 @@ def publish_receipt(result: dict, *, directory: Path) -> None:
     fields = ('folders_matched', 'entries_matched', 'files_matched',
               'directories_matched', 'checkpoint_writes',
               'checkpoints_advanced')
+    proof_fields = ('core_fields_verified', 'timestamps_verified')
     if (not isinstance(result, dict) or result.get('equivalent') is not True
             or any(type(result.get(key)) is not int for key in fields)
+            or any(result.get(key) is not True for key in proof_fields)
             or not 1 <= result['folders_matched'] <= MAX_FOLDERS
             or not 0 <= result['entries_matched'] <= 1_000_000
             or not 0 <= result['files_matched'] <= result['entries_matched']
@@ -133,7 +136,8 @@ def publish_receipt(result: dict, *, directory: Path) -> None:
     if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
             or stat.S_IMODE(info.st_mode) != 0o700):
         raise WorkerError('PROBE_RESULT_CHANNEL_UNTRUSTED')
-    receipt = {'version': 1, 'equivalent': True}
+    receipt = {'version': 2, 'equivalent': True,
+               'core_fields_verified': True, 'timestamps_verified': True}
     receipt.update({key: result[key] for key in fields})
     payload = (json.dumps(receipt, sort_keys=True) + '\n').encode('ascii')
     if len(payload) > MAX_RECEIPT_BYTES:
@@ -176,7 +180,8 @@ def main() -> int:
           f'entries={result["entries_matched"]}, ' +
           f'files={result["files_matched"]}, ' +
           f'dirs={result["directories_matched"]}, ' +
-          'checkpoint_writes=0; bandwidth evaluated by root ledger separately',
+          'checkpoint_writes=0; core_fields_verified=yes; '
+          'timestamps_verified=yes; bandwidth evaluated by root ledger separately',
           flush=True)
     return 0
 
