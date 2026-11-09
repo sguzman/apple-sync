@@ -302,9 +302,14 @@ It prints a sanitized `PROBE_FAILED: CODE` line on a nonzero worker exit.
 A failure receipt cannot authorize metadata equivalence; missing/untrusted
 failure evidence explicitly yields `WORKER_REASON_UNAVAILABLE`.
 Uncontrolled exits and cgroup time/cutoff interruptions remain failures.
+The strict parity validator also classifies **timestamp mismatches**,
+**missing reference fields** and **invalid native core metadata**
+separately, so the next manual report can say which kind of mismatch was
+observed without logging any private values. These codes are matched by
+closed allowlists in both worker and controller.
 
-**New offline checks:** 9 regression tests were added to the previously
-verified 426-test suite, bringing the expected count to **435 tests**.
+**New offline checks:** 10 regression tests were added to the previously
+verified 426-test suite, bringing the expected count to **436 tests**.
 The controller and worker changes are **not installed** or verified on
 the workstation yet. First run the offline suite, then explicitly
 reinstall the root-owned manual service. Do not start any additional live
@@ -316,7 +321,7 @@ its metered Apple traffic.
 **Step A — offline tests only.** After pulling the current branch, run
 `python3 -m unittest discover -s tests -q` and
 `python3 scripts/drive_metered.py status`. Current expected count is
-**435 tests**; confirm it from the actual workstation output. No Apple
+**436 tests**; confirm it from the actual workstation output. No Apple
 requests or system changes happen in this step.
 
 **Step B — deliberate static installation, only after tests pass.**
