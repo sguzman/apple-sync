@@ -110,9 +110,13 @@ def metered_sample(unit: str, *, stop_at: int) -> tuple[int, int, int | None]:
                 print('PROBE_STOP: TIME_LIMIT', flush=True)
                 break
             time.sleep(POLL_SECONDS)
-        raw_status = last.get('ExecMainStatus', '')
-        if re.fullmatch(r'[0-9]{1,4}', raw_status):
-            exit_status = int(raw_status)
+        # A still-running process may report ExecMainStatus=0 even though
+        # the controller stopped it at the traffic/time cutoff. Only an
+        # actually exited worker can report success.
+        if last.get('SubState') in ('exited', 'dead', 'failed'):
+            raw_status = last.get('ExecMainStatus', '')
+            if re.fullmatch(r'[0-9]{1,4}', raw_status):
+                exit_status = int(raw_status)
     finally:
         # Failure to stop fails closed: the ledger remains pending.
         if started:
