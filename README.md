@@ -588,12 +588,19 @@ no Apple network access by itself, and no checkpoint writes**.
 its default, with an optional experimental binary override available only
 to an explicitly configured future probe worker.
 
-A **separate, root-metered, backup-locked live probe service** still needs
-to be implemented and verified before making the first Apple batch request.
-The old one/eight-pass scanner and its cumulative bandwidth ledger remain
-unchanged and disabled. A match on IDs, names, types, ETags and sizes is not
-yet evidence of timestamp equivalence or actual bandwidth savings. Do not
-advance any pending folder checkpoint based on these offline comparisons.
+A **separate, root-metered, backup-locked two-folder probe** has now been
+implemented in `scripts/metered_drive_batch_probe.py` and
+`scripts/drive_batch_probe_worker.py`. It uses the existing exclusive
+root-owned bandwidth ledger, the original archive lock, a time-limited
+IP-accounted user service, and a sampled 1.5 MB traffic cutoff. The
+manual-only static service and start-only launcher live in
+`packaging/apple-sync-drive-batch-probe.service` and
+`scripts/drive_batch_probe_launcher.py`. **This new unit is not yet
+installed, the added tests are not yet host-verified, and no Apple batch
+requests have occurred.** The old one/eight-pass scanner and its ledger
+remain untouched. Do not advance any pending folder checkpoint based on
+the experimental comparison, and do not claim bandwidth savings from a
+successful metadata match alone.
 
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
