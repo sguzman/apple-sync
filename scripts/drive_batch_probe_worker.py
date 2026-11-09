@@ -17,6 +17,7 @@ import stat
 import sys
 
 import archive_batch as archive
+import build_rclone_batch as build_identity
 import diagnose_drive_downloads as diagnosis
 import drive_batch_probe as comparison
 import drive_batch_transport as transport
@@ -42,6 +43,13 @@ def validate_binary(binary: Path = BINARY) -> None:
             or not info.st_mode & stat.S_IXUSR
             or info.st_mode & 0o022):
         raise WorkerError('EXPERIMENTAL_BINARY_UNTRUSTED')
+    # Never trust a similarly named executable merely because it is owned
+    # by the user. Verify the pinned module, exact release and custom Go tag
+    # before any live RC daemon is launched.
+    try:
+        build_identity.verify_binary_identity(binary)
+    except (build_identity.BuildError, OSError):
+        raise WorkerError('EXPERIMENTAL_BINARY_IDENTITY_MISMATCH') from None
 
 
 def probe_once(*, binary: Path = BINARY, state_root: Path = archive.STATE) -> dict:
