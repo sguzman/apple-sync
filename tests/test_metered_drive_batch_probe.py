@@ -67,6 +67,7 @@ class MeteredProbeTests(unittest.TestCase):
             result = controller.metered_sample('unit', stop_at=1500)
         stop.assert_called_once_with('unit')
         self.assertEqual(result[:2], (710, 905))
+        self.assertIsNone(result[2], 'a force-stopped worker is never a success')
 
     def test_stop_failure_leaves_ledger_pending(self):
         samples = [counters(100, 200, substate='exited')]
