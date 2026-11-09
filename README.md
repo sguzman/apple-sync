@@ -575,8 +575,8 @@ An experimental, read-only backend command is available in
 `apple_sync_experimental` Go build tag. A standalone rclone **v1.75.2**
 binary was successfully built and verified on the workstation on November 8,
 2026, including 334/334 Python tests and targeted Go addon tests. The
-binary lives separately from the system rclone and has **not** been used to
-contact Apple. The installed inventory scanner is unchanged.
+binary lives separately from the system rclone. The installed inventory
+scanner is unchanged.
 
 The bounded Unix-socket client in `scripts/drive_batch_transport.py` can now
 return a validated native response for offline identity comparison.
@@ -595,12 +595,17 @@ root-owned bandwidth ledger, the original archive lock, a time-limited
 IP-accounted user service, and a sampled 1.5 MB traffic cutoff. The
 manual-only static service and start-only launcher live in
 `packaging/apple-sync-drive-batch-probe.service` and
-`scripts/drive_batch_probe_launcher.py`. **This new unit is not yet
-installed, the added tests are not yet host-verified, and no Apple batch
-requests have occurred.** The old one/eight-pass scanner and its ledger
-remain untouched. Do not advance any pending folder checkpoint based on
-the experimental comparison, and do not claim bandwidth savings from a
-successful metadata match alone.
+`scripts/drive_batch_probe_launcher.py`. **The manual-only unit is installed; 374 Python tests passed on
+the workstation, and one live probe used 232,137 measured network bytes.**
+The worker exited zero, but the journal did not retain a detectable
+equivalence summary; metadata equivalence remains unconfirmed as a durable
+observation. The revised controller now requires a validated private
+aggregate result receipt rather than relying on transient systemd logs.
+**The updated code and six new regression tests are not yet host-verified
+or reinstalled into the root-owned service. Do not rerun the live probe
+before both steps are complete.** The old one/eight-pass scanner and the
+preserved checkpoint remain unchanged. Do not claim bandwidth savings
+from a successful metadata match alone.
 
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
