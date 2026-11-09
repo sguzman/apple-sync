@@ -17,6 +17,7 @@ from copy import deepcopy
 
 from drive_batch_contract import BatchContractError, plan_batches
 from drive_batch_equivalence import BatchEquivalenceError, compare_with_legacy
+from drive_batch_parity import BatchParityError, compare_core_fields
 
 MAX_PROBE_FOLDERS = 2
 
@@ -34,7 +35,8 @@ def compare_readonly(
         read_native: Callable[[list[tuple[str, str]]], object],
         read_legacy: Callable[[str], list[dict]],
         backup_busy: Callable[[], bool],
-        folder_limit: int = MAX_PROBE_FOLDERS) -> dict:
+        folder_limit: int = MAX_PROBE_FOLDERS,
+        require_core_fields: bool = False) -> dict:
     """Compare exactly one batch with independently fetched legacy listings.
 
     Callers must perform outer systemd IPAccounting and root-owned budget
@@ -43,6 +45,8 @@ def compare_readonly(
     """
     if type(folder_limit) is not int or not 1 <= folder_limit <= MAX_PROBE_FOLDERS:
         raise BatchProbeError('INVALID_PROBE_FOLDER_LIMIT')
+    if type(require_core_fields) is not bool:
+        raise BatchProbeError('INVALID_CORE_PARITY_MODE')
     try:
         # Copy so even a callback unexpectedly mutating its argument
         # cannot change the source checkpoint object held by the caller.
@@ -79,13 +83,20 @@ def compare_readonly(
         require_idle()
         references.append((folder, listing))
     try:
-        result = compare_with_legacy(batch, raw, references)
+        if require_core_fields:
+            result = compare_core_fields(batch, raw, references)
+        else:
+            result = compare_with_legacy(batch, raw, references)
+    except BatchParityError:
+        raise BatchProbeError('PROBE_CORE_FIELD_MISMATCH') from None
     except (BatchEquivalenceError, BatchContractError):
         raise BatchProbeError('PROBE_METADATA_MISMATCH') from None
     require_idle()
     # Explicitly indicate that this is a comparison only. No output may
     # be presented as a completed inventory folder or full metadata proof.
-    return {**result, 'sampled_pending_folders': len(batch),
+    return {**result, 'equivalent': True,
+            'sampled_pending_folders': len(batch),
             'checkpoints_advanced': 0,
             'measured_ip_bytes': None,
-            'timestamps_verified': False}
+            'core_fields_verified': require_core_fields,
+            'timestamps_verified': require_core_fields}
