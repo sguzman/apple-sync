@@ -606,8 +606,23 @@ traffic), leaving **48,276,419 measured bytes** in the cumulative ledger.
 The old one/eight-pass scanner and existing checkpoint remain unchanged.
 This establishes equivalence for only a tiny sample, **not** timestamps,
 batch-wide performance, or bandwidth savings. Do not automatically resume
-the 1,420 pending folders; build and verify a separately gated resumable
-batch scanner with the original reader available as fallback.
+the 1,420 pending folders; the original reader remains the only
+installed resumable scanning path.
+
+Three additional **offline-only** modules now prepare the migration:
+`scripts/drive_batch_checkpoint.py` validates and converts an entire native
+batch and computes an all-or-nothing tentative resume checkpoint without
+writing it; `scripts/drive_batch_reader.py` models a small buffered reader
+compatible with the original `walk_resumable` interface, disabled unless
+a separate field-parity gate is explicitly satisfied; and
+`scripts/drive_batch_parity.py` strictly compares conversion output with
+ordinary rclone fields, including exact timestamps. A total of **39 new
+offline tests** were added, bringing the expected total to **419**, but
+these tests still require workstation verification. The new modules have
+**not** been deployed into the root-metered services and make no Apple
+requests on their own. This scaffold does **not** yet have authority to
+commit the remaining folder checkpoints. More live field-parity and
+per-reader bandwidth evidence is needed before enabling it.
 
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
