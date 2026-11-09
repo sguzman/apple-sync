@@ -61,8 +61,8 @@ class BufferedBatchReader:
             raise BatchReaderError('INVALID_BATCH_READER_FOLDER')
         if type(timeout) not in (int, float) or not 0 < timeout <= 120:
             raise BatchReaderError('INVALID_BATCH_READER_TIMEOUT')
-        self._require_idle()
         try:
+            self._require_idle()
             saved = self.load_checkpoint()
             if (not isinstance(saved, dict) or
                     not isinstance(saved.get('pending'), list) or
@@ -92,6 +92,11 @@ class BufferedBatchReader:
             children = deepcopy(self.buffer[0][1])
             self.buffer.pop(0)
             return children
+        except inventory.InventoryDeferred:
+            # An in-flight background backup can invalidate a prefetched
+            # listing; never reuse buffered remote metadata after deferral.
+            self.buffer.clear()
+            raise
         except (BatchContractError, BatchCheckpointError,
                 inventory.InventoryError, OSError, ValueError, TypeError):
             self.buffer.clear()
