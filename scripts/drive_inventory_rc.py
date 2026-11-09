@@ -92,9 +92,14 @@ def classify_rc_failure(stdout: bytes, stderr: bytes, exit_code: int) -> str:
 
 
 class RcloneRCReader:
-    def __init__(self, state_root: Path, *, max_output: int = MAX_FOLDER_OUTPUT_BYTES):
+    def __init__(self, state_root: Path, *, max_output: int = MAX_FOLDER_OUTPUT_BYTES,
+                 rclone_binary: str = 'rclone'):
         self.state_root = state_root
         self.max_output = max_output
+        # The production scanner passes no override and retains stock rclone.
+        # A future read-only probe may supply its independently verified
+        # experimental binary for both daemon and ordinary RC listings.
+        self.rclone_binary = rclone_binary
         self.private_dir: tempfile.TemporaryDirectory | None = None
         self.socket: Path | None = None
         self.daemon: subprocess.Popen | None = None
@@ -111,7 +116,7 @@ class RcloneRCReader:
             self.socket = private / SOCKET_NAME
             address = 'unix://' + str(self.socket)
             self.daemon = subprocess.Popen(
-                ['rclone', 'rcd', '--rc-addr', address,
+                [self.rclone_binary, 'rcd', '--rc-addr', address,
                  '--rc-no-auth',
                  '--log-level', 'ERROR', '--checkers', '1',
                  '--tpslimit', '2'],
@@ -160,7 +165,7 @@ class RcloneRCReader:
         payload = json.dumps(
             {'fs': 'icloud:', 'remote': folder, 'opt': {'recurse': False}},
             ensure_ascii=False)
-        cmd = ['rclone', 'rc', '--unix-socket', str(self.socket),
+        cmd = [self.rclone_binary, 'rc', '--unix-socket', str(self.socket),
                'operations/list', '--json', payload,
                '--log-level', 'ERROR']
         process = None
