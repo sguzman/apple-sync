@@ -101,6 +101,9 @@ def probe_once(*, binary: Path = BINARY, state_root: Path = archive.STATE) -> di
             # so the next troubleshooting step needs no raw Apple metadata.
             code = str(exc)
             if code in ('PROBE_CORE_FIELD_MISMATCH',
+                        'PROBE_TIMESTAMP_MISMATCH',
+                        'PROBE_REFERENCE_CORE_FIELD_MISSING',
+                        'PROBE_NATIVE_CORE_METADATA_UNVERIFIED',
                         'PROBE_METADATA_MISMATCH',
                         'PROBE_NATIVE_READ_FAILED',
                         'PROBE_LEGACY_READ_FAILED'):
@@ -119,7 +122,9 @@ MAX_RECEIPT_BYTES = 1024
 # Report a category, never raw Apple responses, filenames, or tracebacks.
 # The root-owned controller validates the same closed set.
 FAILURE_CODES = frozenset((
-    'PROBE_CORE_FIELD_MISMATCH', 'PROBE_METADATA_MISMATCH',
+    'PROBE_CORE_FIELD_MISMATCH', 'PROBE_TIMESTAMP_MISMATCH',
+    'PROBE_REFERENCE_CORE_FIELD_MISSING',
+    'PROBE_NATIVE_CORE_METADATA_UNVERIFIED', 'PROBE_METADATA_MISMATCH',
     'PROBE_NATIVE_READ_FAILED', 'PROBE_LEGACY_READ_FAILED',
     'PROBE_COMPARE_FAILED', 'PROBE_BACKUP_BECAME_ACTIVE',
     'PROBE_BACKUP_ACTIVE_OR_UNCERTAIN', 'INVENTORY_CHECKPOINT_CHANGED',
@@ -130,7 +135,7 @@ FAILURE_CODES = frozenset((
     'UNSAFE_ARCHIVE_STATE', 'ARCHIVE_LOCK_MISSING_OR_UNSAFE',
     'ARCHIVE_LOCK_WRONG_OWNER', 'INVALID_PROBE_COMPARISON_RESULT',
     'PROBE_RESULT_TOO_LARGE', 'PROBE_RESULT_CHANNEL_UNTRUSTED',
-    'PROBE_COMPARE_FAILED', 'LOCAL_CHECK_FAILED',
+    'LOCAL_CHECK_FAILED',
     'UNEXPECTED_WORKER_EXCEPTION',
 ))
 
