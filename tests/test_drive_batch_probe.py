@@ -14,6 +14,7 @@ A = 'FOLDER::com.apple.CloudDocs::first'
 B = 'FOLDER::com.apple.CloudDocs::second'
 F1 = 'FILE::com.apple.CloudDocs::file1'
 F2 = 'FILE::com.apple.CloudDocs::file2'
+STAMP = '2026-11-09T11:50:00Z'
 
 
 def checkpoint():
@@ -32,15 +33,16 @@ def native(folder, file_id, name):
     return {'drivewsid': folder, 'type': 'FOLDER', 'status': 'OK',
             'directChildrenCount': 1,
             'items': [{'drivewsid': file_id, 'type': 'FILE',
-                       'name': name, 'extension': 'txt', 'size': 7}]}
+                       'name': name, 'extension': 'txt', 'size': 7,
+                       'dateModified': STAMP}]}
 
 
 def references(folder):
     return {
-        'Private/one': [{'ID': F1, 'Path': 'one.txt',
-                         'IsDir': False, 'Size': 7}],
-        'Private/two': [{'ID': F2, 'Path': 'two.txt',
-                         'IsDir': False, 'Size': 7}],
+        'Private/one': [{'ID': F1, 'Path': 'one.txt', 'Name': 'one.txt',
+                         'ModTime': STAMP, 'IsDir': False, 'Size': 7}],
+        'Private/two': [{'ID': F2, 'Path': 'two.txt', 'Name': 'two.txt',
+                         'ModTime': STAMP, 'IsDir': False, 'Size': 7}],
     }[folder]
 
 
@@ -67,6 +69,48 @@ class ReadOnlyComparisonTests(unittest.TestCase):
         self.assertIsNone(result['measured_ip_bytes'])
         self.assertFalse(result['timestamps_verified'])
         self.assertEqual(progress, original)
+
+    def test_strict_mode_verifies_core_fields_and_timestamps(self):
+        verified = probe.compare_readonly(
+            checkpoint(), read_native=replies, read_legacy=references,
+            backup_busy=lambda: False, require_core_fields=True)
+        self.assertTrue(verified['equivalent'])
+        self.assertTrue(verified['core_fields_verified'])
+        self.assertTrue(verified['timestamps_verified'])
+        self.assertEqual(verified['entries_matched'], 2)
+        self.assertEqual(verified['checkpoints_advanced'], 0)
+
+    def test_strict_mode_rejects_timestamp_mismatch_with_identity_match(self):
+        def wrong_date(folder):
+            listed = deepcopy(references(folder))
+            listed[0]['ModTime'] = '2026-11-09T11:50:01Z'
+            return listed
+        with self.assertRaisesRegex(probe.BatchProbeError, 'PROBE_CORE_FIELD_MISMATCH'):
+            probe.compare_readonly(
+                checkpoint(), read_native=replies, read_legacy=wrong_date,
+                backup_busy=lambda: False, require_core_fields=True)
+        basic = probe.compare_readonly(
+            checkpoint(), read_native=replies, read_legacy=wrong_date,
+            backup_busy=lambda: False)
+        self.assertFalse(basic['timestamps_verified'])
+
+    def test_strict_mode_rejects_missing_reference_modtime(self):
+        def incomplete(folder):
+            listed = deepcopy(references(folder))
+            listed[0].pop('ModTime')
+            return listed
+        with self.assertRaisesRegex(probe.BatchProbeError, 'PROBE_CORE_FIELD_MISMATCH'):
+            probe.compare_readonly(
+                checkpoint(), read_native=replies, read_legacy=incomplete,
+                backup_busy=lambda: False, require_core_fields=True)
+
+    def test_invalid_core_mode_fails_before_remote_requests(self):
+        fetched = Mock()
+        with self.assertRaisesRegex(probe.BatchProbeError, 'INVALID_CORE_PARITY_MODE'):
+            probe.compare_readonly(checkpoint(), read_native=fetched,
+                                   read_legacy=Mock(), backup_busy=lambda: False,
+                                   require_core_fields='yes')
+        fetched.assert_not_called()
 
     def test_limit_one_never_fetches_second_folder(self):
         seen = []
