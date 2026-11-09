@@ -52,8 +52,13 @@ def _trusted_socket(path: Path) -> bool:
             and stat.S_ISSOCK(child.st_mode) and child.st_uid == os.getuid())
 
 
-def fetch_batch(socket_path: Path, batch: list[tuple[str, str]], *,
-                timeout: float = 15) -> list[tuple[str, list[dict]]]:
+def fetch_batch_native(socket_path: Path, batch: list[tuple[str, str]], *,
+                       timeout: float = 15) -> list[dict]:
+    """Return verified native envelopes for independent rclone comparison.
+
+    The RPC result is never persisted. Validation rejects incomplete or
+    mismatched folder sets before raw envelopes reach the comparison.
+    """
     """Fetch one batch from an already-running private rclone RC socket.
 
     Request IDs stay in the HTTP POST body, never argv, logs or URLs.
@@ -101,6 +106,14 @@ def fetch_batch(socket_path: Path, batch: list[tuple[str, str]], *,
         decoded = json.loads(payload)
         if not isinstance(decoded, dict) or set(decoded) != {'result'}:
             raise BatchTransportError('INVALID_BATCH_RC_ENVELOPE')
-        return validate_response(batch, decoded['result'])
+        validate_response(batch, decoded['result'])
+        return decoded['result']
     except (UnicodeError, ValueError, BatchContractError):
         raise BatchTransportError('INVALID_BATCH_RC_RESPONSE') from None
+
+
+def fetch_batch(socket_path: Path, batch: list[tuple[str, str]], *,
+                timeout: float = 15) -> list[tuple[str, list[dict]]]:
+    """Compatibility accessor for already validated per-folder children."""
+    raw = fetch_batch_native(socket_path, batch, timeout=timeout)
+    return validate_response(batch, raw)
