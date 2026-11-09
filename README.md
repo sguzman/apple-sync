@@ -595,17 +595,19 @@ root-owned bandwidth ledger, the original archive lock, a time-limited
 IP-accounted user service, and a sampled 1.5 MB traffic cutoff. The
 manual-only static service and start-only launcher live in
 `packaging/apple-sync-drive-batch-probe.service` and
-`scripts/drive_batch_probe_launcher.py`. **The manual-only unit is installed; 374 Python tests passed on
-the workstation, and one live probe used 232,137 measured network bytes.**
-The worker exited zero, but the journal did not retain a detectable
-equivalence summary; metadata equivalence remains unconfirmed as a durable
-observation. The revised controller now requires a validated private
-aggregate result receipt rather than relying on transient systemd logs.
-**The updated code and six new regression tests are not yet host-verified
-or reinstalled into the root-owned service. Do not rerun the live probe
-before both steps are complete.** The old one/eight-pass scanner and the
-preserved checkpoint remain unchanged. Do not claim bandwidth savings
-from a successful metadata match alone.
+`scripts/drive_batch_probe_launcher.py`. **The manual-only unit is installed, and all 380 Python tests passed
+on the workstation.** A first live probe consumed 232,137 measured bytes
+but lacked an independently visible comparison verdict. After deploying
+private per-run receipts, a second probe on November 9, 2026 explicitly
+verified `equivalent=yes` for **two folders and 12 entries** (10 files,
+2 directories), with **zero checkpoint writes**. The second probe used
+231,027 measured bytes (combined native, ordinary reference and daemon
+traffic), leaving **48,276,419 measured bytes** in the cumulative ledger.
+The old one/eight-pass scanner and existing checkpoint remain unchanged.
+This establishes equivalence for only a tiny sample, **not** timestamps,
+batch-wide performance, or bandwidth savings. Do not automatically resume
+the 1,420 pending folders; build and verify a separately gated resumable
+batch scanner with the original reader available as fallback.
 
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
