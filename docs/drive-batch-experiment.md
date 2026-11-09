@@ -41,6 +41,20 @@ upstream source.
   difference in the identity/name/type/ETag/size checks already implemented.
   It refuses to continue on any active or uncertain backup status. No CLI,
   Apple requests, file writes, or systemd service are exposed by this module.
+- `scripts/drive_batch_probe_worker.py` acquires the same archive lock
+  as the existing scanner, verifies the checkpoint hash is unchanged,
+  requires a metered systemd execution context, and performs a two-folder
+  native-versus-legacy comparison. It prints only aggregate counts.
+- `scripts/metered_drive_batch_probe.py` is the separate root controller.
+  It reserves and reconciles the *existing* cumulative IP ledger; its
+  transient service has IPAccounting and `KillMode=control-group`. The
+  controller stops the entire cgroup before final ledger accounting.
+  A cutoff or time limit is **not** counted as successful equivalence.
+- `packaging/apple-sync-drive-batch-probe.service` and
+  `scripts/drive_batch_probe_launcher.py` make the experiment manual-only.
+  The installation manifest and start-only Polkit rule include this exact
+  new unit; no timer or autostart is configured. No installation or live
+  request has been performed.
 - `scripts/drive_inventory_rc.py` retains `rclone` as the scanner default
   and accepts an optional verified experimental binary when called by a future
   isolated comparison worker. Its private daemon and legacy listing client
@@ -82,12 +96,20 @@ Before any Apple network experiment:
    and Go modules but makes no Apple requests. Reject any upstream API
    differences instead of adapting blindly. Never treat a successful build
    as authorization to scan.
-3. The offline two-folder comparison core is now implemented.
-   Implement a **new, deliberately opt-in system-metered probe controller**
-   with the existing exclusive backup lock, backup-idle checks, root-owned
-   ledger, soft bandwidth cutoff and no checkpoint writes. **That privileged
-   controller is not yet implemented or installed.** The existing manual
-   one/eight-pass service files must not change implicitly.
+3. The separate two-folder worker and root-metered controller now exist
+   in `scripts/drive_batch_probe_worker.py` and
+   `scripts/metered_drive_batch_probe.py`, respectively. The root controller
+   reuses the existing exclusive root-owned cumulative ledger, protects the
+   archive with the original `.apple-sync.lock`, waits for backups to become
+   idle and starts a time-limited, IP-accounted transient user service.
+   Its **sampled** traffic cutoff is 1,500,000 bytes (not a hard quota);
+   it commits observed traffic only after the worker cgroup stops, and
+   leaves interrupted/unmeasurable runs pending. The worker never advances
+   inventory checkpoints. The existing production scan implementation is
+   unchanged. The new probe unit is **not installed or enabled**, and the
+   new Python tests have **not** been verified on the workstation yet.
+   The next step is to verify the entire Python test suite before installing
+   or explicitly starting this separate manual-only service.
 4. Compare *the same one or two folders* with the current rclone reader and
    the batch command in one bounded measured window. Do not log raw names,
    paths, IDs, account data or Apple errors. Explicitly report incompleteness
