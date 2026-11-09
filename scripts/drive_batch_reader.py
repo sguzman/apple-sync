@@ -72,7 +72,15 @@ class BufferedBatchReader:
                 requests = plan_batches(deepcopy(saved), size=self.size)
                 if not requests or requests[0][0][0] != folder:
                     raise BatchReaderError('BATCH_CHECKPOINT_PLAN_CHANGED')
-                native = self.read_native(requests[0], timeout=min(timeout, 30))
+                try:
+                    # The callback is not allowed to mutate the trusted
+                    # request used for validating its response.
+                    native = self.read_native(deepcopy(requests[0]),
+                                              timeout=min(timeout, 30))
+                except inventory.InventoryDeferred:
+                    raise
+                except Exception:
+                    raise BatchReaderError('BATCH_NATIVE_REQUEST_FAILED') from None
                 converted = convert_batch(requests[0], native)
                 if [path for path, _ in converted] != [
                         path for path, _ in requests[0]]:
@@ -85,7 +93,7 @@ class BufferedBatchReader:
             self.buffer.pop(0)
             return children
         except (BatchContractError, BatchCheckpointError,
-                inventory.InventoryError):
+                inventory.InventoryError, OSError, ValueError, TypeError):
             self.buffer.clear()
             raise BatchReaderError('BATCH_READ_NOT_VERIFIED') from None
         except BatchReaderError:
