@@ -570,41 +570,36 @@ file/directory types, directory ETags and file sizes, returning anonymous
 aggregate counts only. Rclone files expose bare Drive IDs; directories expose
 `DriveID#ETag`. Inconsistency fails closed.
 
-An experimental, read-only backend command now exists in
+An experimental, read-only backend command is available in
 `rclone-addon/iclouddrive/apple_sync_batch.go`, protected by the
-`apple_sync_experimental` Go build tag. The bounded Unix-socket client
-`scripts/drive_batch_transport.py` only sends requests to an already-running,
-private, explicitly patched rclone instance. **The addon has not been compiled
-against the workstation's rclone version, is not active in the installed
-scanner, and has made no live Apple batch requests.** No direct transport
-invocation or checkpoint publication is authorized yet. See
-[the batch experiment engineering plan](docs/drive-batch-experiment.md)
-for the exact verification gates.
+`apple_sync_experimental` Go build tag. A standalone rclone **v1.75.2**
+binary was successfully built and verified on the workstation on November 8,
+2026, including 334/334 Python tests and targeted Go addon tests. The
+binary lives separately from the system rclone and has **not** been used to
+contact Apple. The installed inventory scanner is unchanged.
 
-The existing manual-only metered scanner and budget remain unchanged.
+The bounded Unix-socket client in `scripts/drive_batch_transport.py` can now
+return a validated native response for offline identity comparison.
+`scripts/drive_batch_probe.py` selects at most two pending folders and
+compares their native batch envelope against independent ordinary rclone
+listings, using injected callbacks and backup-idle checks. It has **no CLI,
+no Apple network access by itself, and no checkpoint writes**.
+`scripts/drive_inventory_rc.py` retains the stock `rclone` executable as
+its default, with an optional experimental binary override available only
+to an explicitly configured future probe worker.
 
-The host now reports rclone **v1.75.2**. An isolated Go build launcher
-at `scripts/build_rclone_batch.py` pins the upstream rclone source to commit
-`be8d6044eacb843b74d335db0c5fbe09222031fe`. Preview it without
-network access via `python3 scripts/build_rclone_batch.py`; explicitly run
-`python3 scripts/build_rclone_batch.py --execute` to fetch public rclone/Go
-dependencies, compile the experimental addon and run its targeted Go tests.
-It builds outside the user's installed rclone path, does not configure
-credentials, call Apple or touch any inventory checkpoints. After the initial
-workstation build timed out or otherwise failed, the launcher was hardened
-with an exclusive build lock, retry-safe gofmt staging, specific error codes,
-longer bounded Go compilation, process-group cleanup, and non-overwriting
-verification of an already built experimental binary. The targeted Go addon tests and full `go build` subsequently
-passed on the workstation, but the launcher rejected the temporary binary
-because its original verification confused rclone's curated
-`go/tags` display with Go's actual `-tags` build metadata, and the
-original build omitted the pinned release-version linker stamp (leaving
-rclone's default `-DEV` suffix). These have been corrected using
-`go version -m` with strict module/tag checks and an explicit upstream
-`fs.Version=v1.75.2` linker variable. The isolated
-binary has **not yet been published or accepted on the host**; the live
-Apple batch reader has never been enabled. See
-[the recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
+A **separate, root-metered, backup-locked live probe service** still needs
+to be implemented and verified before making the first Apple batch request.
+The old one/eight-pass scanner and its cumulative bandwidth ledger remain
+unchanged and disabled. A match on IDs, names, types, ETags and sizes is not
+yet evidence of timestamp equivalence or actual bandwidth savings. Do not
+advance any pending folder checkpoint based on these offline comparisons.
+
+See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
+and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
+The initial build verification bugs (release version suffix and custom Go
+build tags) were corrected without editing installed rclone or clearing the
+Go cache.
 
 ## Metered, cumulative-budget Drive inventory (administrative opt-in)
 
