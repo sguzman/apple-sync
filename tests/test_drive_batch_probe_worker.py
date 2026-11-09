@@ -20,7 +20,8 @@ def summary():
     return {'folders_matched': 2, 'entries_matched': 1,
             'files_matched': 1, 'directories_matched': 0,
             'equivalent': True, 'checkpoint_writes': 0,
-            'checkpoints_advanced': 0}
+            'checkpoints_advanced': 0,
+            'core_fields_verified': True, 'timestamps_verified': True}
 
 
 class ProbeWorkerTests(unittest.TestCase):
@@ -64,6 +65,7 @@ class ProbeWorkerTests(unittest.TestCase):
                                        state_root=self.state)
         save.assert_not_called()
         self.assertEqual(compare.call_count, 1)
+        self.assertTrue(compare.call_args.kwargs['require_core_fields'])
         self.assertEqual(result, summary())
         return result
 
@@ -147,7 +149,9 @@ class ProbeWorkerTests(unittest.TestCase):
             worker.publish_receipt(summary(), directory=directory)
             path = directory / worker.RECEIPT_NAME
             result = json.loads(path.read_text())
-            self.assertEqual(result['version'], 1)
+            self.assertEqual(result['version'], 2)
+            self.assertTrue(result['core_fields_verified'])
+            self.assertTrue(result['timestamps_verified'])
             self.assertTrue(result['equivalent'])
             self.assertEqual(result['folders_matched'], 2)
             self.assertEqual(result['checkpoint_writes'], 0)
@@ -157,6 +161,18 @@ class ProbeWorkerTests(unittest.TestCase):
             self.assertNotIn('ID', result)
             with self.assertRaises(FileExistsError):
                 worker.publish_receipt(summary(), directory=directory)
+
+    def test_identity_only_success_cannot_write_parity_receipt(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            directory.chmod(0o700)
+            for absent_flag in ('core_fields_verified', 'timestamps_verified'):
+                weak = summary()
+                weak[absent_flag] = False
+                with self.subTest(flag=absent_flag), self.assertRaisesRegex(
+                        worker.WorkerError, 'INVALID_PROBE_COMPARISON_RESULT'):
+                    worker.publish_receipt(weak, directory=directory)
+            self.assertFalse((directory / worker.RECEIPT_NAME).exists())
 
     def test_invalid_receipt_result_does_not_write(self):
         with tempfile.TemporaryDirectory() as temp:
