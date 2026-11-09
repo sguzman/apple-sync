@@ -54,15 +54,10 @@ def _trusted_socket(path: Path) -> bool:
 
 def fetch_batch_native(socket_path: Path, batch: list[tuple[str, str]], *,
                        timeout: float = 15) -> list[dict]:
-    """Return verified native envelopes for independent rclone comparison.
+    """Fetch and validate raw Apple envelopes over a private RC socket.
 
-    The RPC result is never persisted. Validation rejects incomplete or
-    mismatched folder sets before raw envelopes reach the comparison.
-    """
-    """Fetch one batch from an already-running private rclone RC socket.
-
-    Request IDs stay in the HTTP POST body, never argv, logs or URLs.
-    This layer validates the response but cannot establish completeness.
+    Never persists results. Drive IDs stay in the POST body, not argv,
+    logs or URLs; completeness remains unproven until reference comparison.
     """
     if (type(timeout) not in (int, float) or timeout <= 0 or
             timeout > MAX_TIMEOUT):
