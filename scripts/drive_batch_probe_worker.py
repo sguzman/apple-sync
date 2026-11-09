@@ -116,6 +116,53 @@ def probe_once(*, binary: Path = BINARY, state_root: Path = archive.STATE) -> di
 RECEIPT_NAME = 'result.json'
 MAX_RECEIPT_BYTES = 1024
 
+# Report a category, never raw Apple responses, filenames, or tracebacks.
+# The root-owned controller validates the same closed set.
+FAILURE_CODES = frozenset((
+    'PROBE_CORE_FIELD_MISMATCH', 'PROBE_METADATA_MISMATCH',
+    'PROBE_NATIVE_READ_FAILED', 'PROBE_LEGACY_READ_FAILED',
+    'PROBE_COMPARE_FAILED', 'PROBE_BACKUP_BECAME_ACTIVE',
+    'PROBE_BACKUP_ACTIVE_OR_UNCERTAIN', 'INVENTORY_CHECKPOINT_CHANGED',
+    'INVENTORY_CHECKPOINT_MISSING', 'OTHER_APPLE_ARCHIVE_ACTIVE',
+    'EXPERIMENTAL_BINARY_MISSING_OR_UNSAFE',
+    'EXPERIMENTAL_BINARY_UNTRUSTED',
+    'EXPERIMENTAL_BINARY_IDENTITY_MISMATCH',
+    'UNSAFE_ARCHIVE_STATE', 'ARCHIVE_LOCK_MISSING_OR_UNSAFE',
+    'ARCHIVE_LOCK_WRONG_OWNER', 'INVALID_PROBE_COMPARISON_RESULT',
+    'PROBE_RESULT_TOO_LARGE', 'PROBE_RESULT_CHANNEL_UNTRUSTED',
+    'PROBE_COMPARE_FAILED', 'LOCAL_CHECK_FAILED',
+    'UNEXPECTED_WORKER_EXCEPTION',
+))
+
+
+def validate_result_channel(directory: Path) -> None:
+    """Fail before Apple traffic if the private result channel is invalid."""
+    if not directory.is_absolute() or directory.is_symlink():
+        raise WorkerError('PROBE_RESULT_CHANNEL_UNTRUSTED')
+    info = directory.stat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o700):
+        raise WorkerError('PROBE_RESULT_CHANNEL_UNTRUSTED')
+
+
+def publish_failure_receipt(code: str, *, directory: Path) -> None:
+    """A tiny, exclusive private error receipt, never a success attestation."""
+    if code not in FAILURE_CODES:
+        code = 'UNEXPECTED_WORKER_EXCEPTION'
+    validate_result_channel(directory)
+    payload = (json.dumps({
+        'version': 2, 'outcome': 'failed', 'code': code,
+        'checkpoint_writes': 0,
+    }, sort_keys=True) + '\n').encode('ascii')
+    if len(payload) > MAX_RECEIPT_BYTES:
+        raise WorkerError('PROBE_RESULT_TOO_LARGE')
+    fd = os.open(directory / RECEIPT_NAME,
+                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'wb') as output:
+        output.write(payload)
+        output.flush()
+        os.fsync(output.fileno())
+
 
 def publish_receipt(result: dict, *, directory: Path) -> None:
     """Give the metered controller a private, explicit equivalence verdict.
@@ -140,12 +187,7 @@ def publish_receipt(result: dict, *, directory: Path) -> None:
             or result['checkpoint_writes'] != 0
             or result['checkpoints_advanced'] != 0):
         raise WorkerError('INVALID_PROBE_COMPARISON_RESULT')
-    if not directory.is_absolute() or directory.is_symlink():
-        raise WorkerError('PROBE_RESULT_CHANNEL_UNTRUSTED')
-    info = directory.stat()
-    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
-            or stat.S_IMODE(info.st_mode) != 0o700):
-        raise WorkerError('PROBE_RESULT_CHANNEL_UNTRUSTED')
+    validate_result_channel(directory)
     receipt = {'version': 2, 'equivalent': True,
                'core_fields_verified': True, 'timestamps_verified': True}
     receipt.update({key: result[key] for key in fields})
@@ -174,14 +216,31 @@ def main() -> int:
             not os.environ.get('APPLE_SYNC_BATCH_METERED') == '1'):
         print('PROBE_REFUSED: METERED_SERVICE_REQUIRED', file=sys.stderr)
         return 2
+    # Validate the receipt channel before a metered Apple read. Never do
+    # network work and only then discover that failure reporting is missing.
+    receipt_dir = os.environ.get('APPLE_SYNC_BATCH_RECEIPT_DIR')
+    if not receipt_dir:
+        print('PROBE_FAILED: PROBE_RESULT_CHANNEL_MISSING',
+              file=sys.stderr, flush=True)
+        return 2
+    channel = Path(receipt_dir)
     try:
+        validate_result_channel(channel)
         result = probe_once()
-        receipt_dir = os.environ.get('APPLE_SYNC_BATCH_RECEIPT_DIR')
-        if not receipt_dir:
-            raise WorkerError('PROBE_RESULT_CHANNEL_MISSING')
-        publish_receipt(result, directory=Path(receipt_dir))
-    except (WorkerError, inventory.InventoryError, OSError) as exc:
-        category = str(exc) if isinstance(exc, WorkerError) else 'LOCAL_CHECK_FAILED'
+        publish_receipt(result, directory=channel)
+    except Exception as exc:
+        category = (str(exc) if isinstance(exc, WorkerError)
+                    else 'LOCAL_CHECK_FAILED' if isinstance(
+                        exc, (inventory.InventoryError, OSError))
+                    else 'UNEXPECTED_WORKER_EXCEPTION')
+        if category not in FAILURE_CODES:
+            category = 'UNEXPECTED_WORKER_EXCEPTION'
+        try:
+            publish_failure_receipt(category, directory=channel)
+        except (OSError, WorkerError):
+            # The controller will correctly report a missing/untrusted
+            # receipt. Never claim success or expose arbitrary exception text.
+            pass
         print('PROBE_FAILED: ' + category, file=sys.stderr, flush=True)
         return 2
     print('PROBE_EQUIVALENCE: equivalent=' +
