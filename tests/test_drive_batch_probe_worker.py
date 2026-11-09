@@ -200,6 +200,84 @@ class ProbeWorkerTests(unittest.TestCase):
                 worker.publish_receipt(malformed, directory=directory)
             self.assertFalse((directory / worker.RECEIPT_NAME).exists())
 
+    def test_failure_receipt_contains_only_approved_category(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            directory.chmod(0o700)
+            worker.publish_failure_receipt('PROBE_CORE_FIELD_MISMATCH',
+                                           directory=directory)
+            path = directory / worker.RECEIPT_NAME
+            self.assertEqual(json.loads(path.read_text()), {
+                'version': 2, 'outcome': 'failed',
+                'code': 'PROBE_CORE_FIELD_MISMATCH', 'checkpoint_writes': 0})
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            with self.assertRaises(FileExistsError):
+                worker.publish_failure_receipt('LOCAL_CHECK_FAILED',
+                                               directory=directory)
+
+    def test_unrecognized_reason_cannot_leak_user_metadata(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            directory.chmod(0o700)
+            worker.publish_failure_receipt('Private/MyDocs/secret.txt',
+                                           directory=directory)
+            data = json.loads((directory / worker.RECEIPT_NAME).read_text())
+            self.assertEqual(data['code'], 'UNEXPECTED_WORKER_EXCEPTION')
+            self.assertNotIn('secret', str(data))
+
+    def test_main_failure_writes_sanitized_private_receipt(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            directory.chmod(0o700)
+            env = {'INVOCATION_ID': 'test', 'APPLE_SYNC_BATCH_METERED': '1',
+                   'APPLE_SYNC_BATCH_RECEIPT_DIR': str(directory)}
+            with (patch.object(sys, 'argv', ['worker', '--execute']),
+                  patch.object(worker.os, 'geteuid', return_value=1000),
+                  patch.dict(os.environ, env, clear=True),
+                  patch.object(worker, 'probe_once',
+                               side_effect=worker.WorkerError(
+                                   'PROBE_CORE_FIELD_MISMATCH')),
+                  contextlib.redirect_stderr(io.StringIO()) as err):
+                self.assertEqual(worker.main(), 2)
+            receipt = json.loads((directory / worker.RECEIPT_NAME).read_text())
+            self.assertEqual(receipt['code'], 'PROBE_CORE_FIELD_MISMATCH')
+            self.assertIn('PROBE_CORE_FIELD_MISMATCH', err.getvalue())
+            self.assertNotIn('equivalent=yes', err.getvalue())
+
+    def test_unexpected_failure_is_sanitized_in_private_receipt(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            directory.chmod(0o700)
+            env = {'INVOCATION_ID': 'test', 'APPLE_SYNC_BATCH_METERED': '1',
+                   'APPLE_SYNC_BATCH_RECEIPT_DIR': str(directory)}
+            with (patch.object(sys, 'argv', ['worker', '--execute']),
+                  patch.object(worker.os, 'geteuid', return_value=1000),
+                  patch.dict(os.environ, env, clear=True),
+                  patch.object(worker, 'probe_once',
+                               side_effect=RuntimeError('private token 123')),
+                  contextlib.redirect_stderr(io.StringIO()) as err):
+                self.assertEqual(worker.main(), 2)
+            receipt = json.loads((directory / worker.RECEIPT_NAME).read_text())
+            self.assertEqual(receipt['code'], 'UNEXPECTED_WORKER_EXCEPTION')
+            self.assertNotIn('private token', err.getvalue())
+            self.assertNotIn('private token', str(receipt))
+
+    def test_untrusted_receipt_directory_blocks_before_remote_probe(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            directory.chmod(0o755)
+            env = {'INVOCATION_ID': 'test', 'APPLE_SYNC_BATCH_METERED': '1',
+                   'APPLE_SYNC_BATCH_RECEIPT_DIR': str(directory)}
+            with (patch.object(sys, 'argv', ['worker', '--execute']),
+                  patch.object(worker.os, 'geteuid', return_value=1000),
+                  patch.dict(os.environ, env, clear=True),
+                  patch.object(worker, 'probe_once') as probe,
+                  contextlib.redirect_stderr(io.StringIO()) as err):
+                self.assertEqual(worker.main(), 2)
+            probe.assert_not_called()
+            self.assertIn('PROBE_RESULT_CHANNEL_UNTRUSTED', err.getvalue())
+            self.assertFalse((directory / worker.RECEIPT_NAME).exists())
+
     def test_metered_worker_refuses_success_if_receipt_channel_missing(self):
         with (patch.object(sys, 'argv', ['worker', '--execute']),
               patch.object(worker.os, 'geteuid', return_value=1000),
