@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
+import os
 from pathlib import Path
+import tempfile
 import sys
 import unittest
 from unittest.mock import Mock, patch
@@ -33,11 +36,15 @@ class MeteredProbeTests(unittest.TestCase):
               patch.object(controller.baseline, 'run',
                            side_effect=lambda argv, **kwargs: command.extend(argv)),
               patch.object(Path, 'is_file', return_value=True)):
-            controller.start_worker('apple-sync-drive-metered-batch-probe-test.service')
+            controller.start_worker('apple-sync-drive-metered-batch-probe-test.service',
+                                    receipt_dir=Path('/run/user/1000/probe-test'))
         self.assertIn('--property=IPAccounting=yes', command)
         self.assertIn('--property=KillMode=control-group', command)
         self.assertIn('--property=User=sguzman', command)
         self.assertIn('--setenv=APPLE_SYNC_BATCH_METERED=1', command)
+        self.assertIn('--setenv=APPLE_SYNC_BATCH_RECEIPT_DIR=/run/user/1000/probe-test',
+                      command)
+        self.assertIn('--property=StandardOutput=journal', command)
         self.assertIn('--property=NoNewPrivileges=yes', command)
         self.assertNotIn('--on-calendar', command)
         self.assertEqual(command[-1], '--execute')
@@ -53,7 +60,7 @@ class MeteredProbeTests(unittest.TestCase):
               patch.object(controller, 'sanitized_worker_log',
                            side_effect=lambda *_a: calls.append('log')),
               contextlib.redirect_stdout(io.StringIO())):
-            traffic = controller.metered_sample('unit', stop_at=1000)
+            traffic = controller.metered_sample('unit', receipt_dir=Path('/tmp/fake-probe'), stop_at=1000)
         self.assertEqual(traffic, (550, 210, 0))
         self.assertEqual(calls, ['start', 'stop', 'log'])
 
@@ -64,7 +71,7 @@ class MeteredProbeTests(unittest.TestCase):
               patch.object(controller.baseline, 'stop') as stop,
               patch.object(controller, 'sanitized_worker_log'),
               contextlib.redirect_stdout(io.StringIO())):
-            result = controller.metered_sample('unit', stop_at=1500)
+            result = controller.metered_sample('unit', receipt_dir=Path('/tmp/fake-probe'), stop_at=1500)
         stop.assert_called_once_with('unit')
         self.assertEqual(result[:2], (710, 905))
         self.assertIsNone(result[2], 'a force-stopped worker is never a success')
@@ -77,7 +84,7 @@ class MeteredProbeTests(unittest.TestCase):
                            side_effect=controller.baseline.TrialError('SYSTEMD_STOP_UNCONFIRMED')),
               self.assertRaisesRegex(controller.baseline.TrialError,
                                     'SYSTEMD_STOP_UNCONFIRMED')):
-            controller.metered_sample('unit', stop_at=1500)
+            controller.metered_sample('unit', receipt_dir=Path('/tmp/fake-probe'), stop_at=1500)
 
     def test_run_uses_one_shared_ledger_reservation_and_completion(self):
         events = []
@@ -103,6 +110,11 @@ class MeteredProbeTests(unittest.TestCase):
                            return_value=True),
               patch.object(controller.baseline, 'preflight'),
               patch.object(controller, 'BudgetLedger', return_value=ledger),
+              patch.object(controller, 'receipt_directory',
+                           return_value=contextlib.nullcontext(Path('/tmp/fake-probe'))),
+              patch.object(controller, 'read_receipt', return_value={
+                  'folders_matched': 2, 'entries_matched': 1,
+                  'files_matched': 1, 'directories_matched': 0}),
               patch.object(controller, 'metered_sample',
                            side_effect=lambda *a, **kw:
                            (events.append('worker'), (100, 200, 0))[1]),
@@ -156,6 +168,8 @@ class MeteredProbeTests(unittest.TestCase):
               patch.object(controller.baseline, 'wait_for_idle_window', return_value=True),
               patch.object(controller.baseline, 'preflight'),
               patch.object(controller, 'BudgetLedger', return_value=ledger),
+              patch.object(controller, 'receipt_directory',
+                           return_value=contextlib.nullcontext(Path('/tmp/fake-probe'))),
               patch.object(controller, 'metered_sample', return_value=(8, 9, 2)),
               contextlib.redirect_stdout(io.StringIO())):
             self.assertEqual(controller.execute(), 2)
@@ -168,8 +182,75 @@ class MeteredProbeTests(unittest.TestCase):
               patch.object(controller.baseline, 'stop') as stopped,
               patch.object(controller, 'sanitized_worker_log'),
               self.assertRaises(controller.baseline.TrialError)):
-            controller.metered_sample('unit', stop_at=1500)
+            controller.metered_sample('unit', receipt_dir=Path('/tmp/fake-probe'), stop_at=1500)
         stopped.assert_called_once()
+
+    def test_private_result_receipt_roundtrip(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            directory.chmod(0o700)
+            receipt = {
+                'version': 1, 'equivalent': True, 'folders_matched': 2,
+                'entries_matched': 3, 'files_matched': 2,
+                'directories_matched': 1, 'checkpoint_writes': 0,
+                'checkpoints_advanced': 0,
+            }
+            path = directory / controller.RECEIPT_NAME
+            path.write_text(json.dumps(receipt))
+            path.chmod(0o600)
+            user = Mock(pw_uid=os.getuid(), pw_gid=os.getgid())
+            with patch.object(controller.pwd, 'getpwnam', return_value=user):
+                self.assertEqual(controller.read_receipt(directory), receipt)
+
+    def test_missing_or_invalid_receipt_never_establishes_equivalence(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            directory.chmod(0o700)
+            user = Mock(pw_uid=os.getuid(), pw_gid=os.getgid())
+            with patch.object(controller.pwd, 'getpwnam', return_value=user):
+                with self.assertRaisesRegex(controller.ProbeMeterError, 'RECEIPT_MISSING'):
+                    controller.read_receipt(directory)
+                path = directory / controller.RECEIPT_NAME
+                path.write_text(json.dumps({
+                    'version': 1, 'equivalent': True, 'folders_matched': 2,
+                    'entries_matched': 1, 'files_matched': 1,
+                    'directories_matched': 0, 'checkpoint_writes': 1,
+                    'checkpoints_advanced': 0,
+                }))
+                path.chmod(0o600)
+                with self.assertRaisesRegex(controller.ProbeMeterError, 'RECEIPT_INVALID'):
+                    controller.read_receipt(directory)
+
+    def test_zero_exit_without_receipt_returns_failure_after_accounting(self):
+        class Ledger:
+            remaining = 10_000_000
+            def __enter__(self):
+                return self
+            def __exit__(self, *_a):
+                pass
+            def check_ready(self):
+                pass
+            def begin(self, *_a):
+                pass
+            def complete(self, ingress, egress):
+                self.measured = ingress, egress
+            def summary(self):
+                return 'safe'
+        ledger = Ledger()
+        with (patch.object(controller.baseline, 'guard_setup'),
+              patch.object(controller.baseline, 'wait_for_idle_window', return_value=True),
+              patch.object(controller.baseline, 'preflight'),
+              patch.object(controller, 'BudgetLedger', return_value=ledger),
+              patch.object(controller, 'receipt_directory',
+                           return_value=contextlib.nullcontext(Path('/tmp/fake-probe'))),
+              patch.object(controller, 'metered_sample', return_value=(123, 45, 0)),
+              patch.object(controller, 'read_receipt',
+                           side_effect=controller.ProbeMeterError(
+                               'PROBE_EQUIVALENCE_RECEIPT_MISSING')),
+              contextlib.redirect_stdout(io.StringIO()) as out):
+            self.assertEqual(controller.execute(), 2)
+        self.assertEqual(ledger.measured, (123, 45))
+        self.assertIn('equivalence NOT verified', out.getvalue())
 
     def test_logs_never_relay_arbitrary_remote_paths(self):
         raw = ('Sensitive folder FOLDER::private::secret\n'
