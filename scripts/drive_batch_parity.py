@@ -63,17 +63,26 @@ def compare_core_fields(
                 expected = native_by_id.get(row['ID'])
                 if expected is None:
                     raise BatchParityError('BATCH_REFERENCE_ID_MISMATCH')
-                if (not valid_timestamp(row['ModTime']) or
-                        any(type(row[key]) is not type(expected[key])
-                            or row[key] != expected[key] for key in CORE_FIELDS)):
+                # Report categories only, not the private values.
+                # Exact timestamp differences are a separate migration
+                # blocker from other metadata disagreements.
+                if (not valid_timestamp(row['ModTime'])
+                        or type(row['ModTime']) is not type(expected['ModTime'])
+                        or row['ModTime'] != expected['ModTime']):
+                    raise BatchParityError('BATCH_TIMESTAMP_MISMATCH')
+                if any(type(row[key]) is not type(expected[key])
+                       or row[key] != expected[key]
+                       for key in CORE_FIELDS - {'ModTime'}):
                     raise BatchParityError('BATCH_CORE_FIELD_MISMATCH')
                 checked += 1
             if observed_ids != set(native_by_id):
                 raise BatchParityError('BATCH_REFERENCE_INCOMPLETE')
         if checked != identity['entries_matched']:
             raise BatchParityError('BATCH_CORE_COUNT_MISMATCH')
-    except (BatchCheckpointError, BatchEquivalenceError, TypeError,
-            ValueError, KeyError, AttributeError):
+    except BatchCheckpointError:
+        raise BatchParityError('BATCH_NATIVE_CORE_METADATA_UNVERIFIED') from None
+    except (BatchEquivalenceError, TypeError, ValueError, KeyError,
+            AttributeError):
         raise BatchParityError('BATCH_CORE_PARITY_UNVERIFIED') from None
     return {
         'folders_matched': identity['folders_matched'],
