@@ -109,7 +109,9 @@ def read_receipt(directory: Path) -> dict:
 # No user-supplied strings are ever copied into controller diagnostics.
 # This closed set mirrors the worker's privacy-safe failure categories.
 WORKER_FAILURE_CODES = frozenset((
-    'PROBE_CORE_FIELD_MISMATCH', 'PROBE_METADATA_MISMATCH',
+    'PROBE_CORE_FIELD_MISMATCH', 'PROBE_TIMESTAMP_MISMATCH',
+    'PROBE_REFERENCE_CORE_FIELD_MISSING',
+    'PROBE_NATIVE_CORE_METADATA_UNVERIFIED', 'PROBE_METADATA_MISMATCH',
     'PROBE_NATIVE_READ_FAILED', 'PROBE_LEGACY_READ_FAILED',
     'PROBE_COMPARE_FAILED', 'PROBE_BACKUP_BECAME_ACTIVE',
     'PROBE_BACKUP_ACTIVE_OR_UNCERTAIN', 'INVENTORY_CHECKPOINT_CHANGED',
