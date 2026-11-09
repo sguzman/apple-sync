@@ -54,7 +54,7 @@ class MeteredProbeTests(unittest.TestCase):
         samples = iter([counters(500, 200, substate='exited'),
                         counters(550, 210, substate='dead')])
         calls = []
-        with (patch.object(controller, 'start_worker', side_effect=lambda *_a: calls.append('start')),
+        with (patch.object(controller, 'start_worker', side_effect=lambda *_a, **_kw: calls.append('start')),
               patch.object(controller.baseline, 'props', side_effect=lambda *_a: next(samples)),
               patch.object(controller.baseline, 'stop', side_effect=lambda *_a: calls.append('stop')),
               patch.object(controller, 'sanitized_worker_log',
