@@ -150,7 +150,8 @@ def sanitized_worker_log(unit: str) -> None:
                         r'PROBE_EQUIVALENCE: equivalent=(yes|no), '
                         r'folders=[0-2], entries=[0-9]{1,7}, '
                         r'files=[0-9]{1,7}, dirs=[0-9]{1,7}, '
-                        r'checkpoint_writes=0; bandwidth evaluated by '
+                        r'checkpoint_writes=0; core_fields_verified=yes; '
+                        r'timestamps_verified=yes; bandwidth evaluated by '
                         r'root ledger separately', line):
                     print(line, flush=True)
                 elif re.fullmatch(r'PROBE_FAILED: [A-Z_]+', line):
