@@ -106,6 +106,61 @@ def read_receipt(directory: Path) -> dict:
     return data
 
 
+# No user-supplied strings are ever copied into controller diagnostics.
+# This closed set mirrors the worker's privacy-safe failure categories.
+WORKER_FAILURE_CODES = frozenset((
+    'PROBE_CORE_FIELD_MISMATCH', 'PROBE_METADATA_MISMATCH',
+    'PROBE_NATIVE_READ_FAILED', 'PROBE_LEGACY_READ_FAILED',
+    'PROBE_COMPARE_FAILED', 'PROBE_BACKUP_BECAME_ACTIVE',
+    'PROBE_BACKUP_ACTIVE_OR_UNCERTAIN', 'INVENTORY_CHECKPOINT_CHANGED',
+    'INVENTORY_CHECKPOINT_MISSING', 'OTHER_APPLE_ARCHIVE_ACTIVE',
+    'EXPERIMENTAL_BINARY_MISSING_OR_UNSAFE',
+    'EXPERIMENTAL_BINARY_UNTRUSTED',
+    'EXPERIMENTAL_BINARY_IDENTITY_MISMATCH',
+    'UNSAFE_ARCHIVE_STATE', 'ARCHIVE_LOCK_MISSING_OR_UNSAFE',
+    'ARCHIVE_LOCK_WRONG_OWNER', 'INVALID_PROBE_COMPARISON_RESULT',
+    'PROBE_RESULT_TOO_LARGE', 'PROBE_RESULT_CHANNEL_UNTRUSTED',
+    'LOCAL_CHECK_FAILED', 'UNEXPECTED_WORKER_EXCEPTION',
+))
+
+
+def read_failure_receipt(directory: Path) -> str:
+    """Return a validated fixed failure code, never private worker output.
+
+    This receipt is *only* inspected after the stopped worker's traffic has
+    been durably accounted for, and only when the worker did not exit zero.
+    A failure receipt is never accepted as proof of metadata equivalence.
+    """
+    user = pwd.getpwnam(USER)
+    info = directory.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != user.pw_uid
+            or stat.S_IMODE(info.st_mode) != 0o700):
+        raise ProbeMeterError('PROBE_FAILURE_RECEIPT_UNTRUSTED')
+    path = directory / RECEIPT_NAME
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        raise ProbeMeterError('PROBE_FAILURE_RECEIPT_MISSING') from None
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != user.pw_uid
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_nlink != 1 or not 0 < info.st_size <= MAX_RECEIPT_BYTES):
+        raise ProbeMeterError('PROBE_FAILURE_RECEIPT_UNTRUSTED')
+    try:
+        data = json.loads(path.read_bytes())
+    except (OSError, ValueError, UnicodeError):
+        raise ProbeMeterError('PROBE_FAILURE_RECEIPT_INVALID') from None
+    if (not isinstance(data, dict)
+            or set(data) != {'version', 'outcome', 'code', 'checkpoint_writes'}
+            or type(data['version']) is not int or data['version'] != 2
+            or data['outcome'] != 'failed'
+            or type(data['checkpoint_writes']) is not int
+            or data['checkpoint_writes'] != 0
+            or not isinstance(data['code'], str)
+            or data['code'] not in WORKER_FAILURE_CODES):
+        raise ProbeMeterError('PROBE_FAILURE_RECEIPT_INVALID')
+    return data['code']
+
+
 def start_worker(unit: str, *, receipt_dir: Path) -> None:
     user = pwd.getpwnam(USER)
     worker = REPO / 'scripts' / 'drive_batch_probe_worker.py'
@@ -251,6 +306,19 @@ def execute() -> int:
             ledger.complete(ingress, egress)
             print(ledger.summary(), flush=True)
             if exit_status != 0:
+                # A transient systemd unit may drop stdout/stderr from the
+                # journal. Read the private worker's fixed error category
+                # only after the service has stopped and IP bytes are saved.
+                if exit_status is None:
+                    print('PROBE_FAILED: WORKER_INTERRUPTED', flush=True)
+                else:
+                    try:
+                        reason = read_failure_receipt(result_dir)
+                    except ProbeMeterError:
+                        print('PROBE_FAILED: WORKER_REASON_UNAVAILABLE',
+                              flush=True)
+                    else:
+                        print('PROBE_FAILED: ' + reason, flush=True)
                 print('PROBE_RESULT: WORKER_FAILED_OR_INTERRUPTED; '
                       'measured traffic committed; no checkpoint writes',
                       flush=True)
