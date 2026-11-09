@@ -271,12 +271,52 @@ Even a strict success would not establish a batch-only bandwidth saving,
 full field fidelity beyond the six core fields, or permission to
 write the production checkpoint.
 
+## Strict probe #3: failed, failure code lost (2026-11-09)
+
+The third explicitly authorized manual probe attempted strict timestamp and
+core-field parity. The worker exited **status=2** after about 9 seconds.
+Observed ingress was **178,534 bytes** and egress **50,284 bytes**, for
+**228,818 total bytes**. The shared IP ledger was durably reconciled at
+**51,952,399 bytes used, 48,047,601 bytes remaining, 69 completed passes,
+pending=no**. The original Drive inventory checkpoint remains
+**1,606 completed folders, 1,420 pending, 10,455 entries**.
+
+System journal searches found only systemd lifecycle lines and no
+`PROBE_FAILED` error from the transient worker. This establishes that
+the worker **failed**, but does not prove whether it was a timestamp
+mismatch, a missing metadata field, a backup deferral, or another issue.
+The `2/INVALIDARGUMENT` systemd label is generic for exit status 2, not
+a trustworthy diagnosis of the underlying failure. **Do not repeat this
+live probe blindly.**
+
+To avoid wasting further bandwidth, the worker now validates the private
+receipt directory **before** any network call. On worker failure, it
+writes a separate version-2, mode-0600 `result.json` containing only an
+allowlisted fixed diagnostic code and `checkpoint_writes=0`. Unexpected
+exceptions are reduced to `UNEXPECTED_WORKER_EXCEPTION`; no exception
+details, filenames, folder IDs or raw Apple responses are written.
+The root controller accepts a failure receipt only from the same trusted
+ephemeral mode-0700 directory and **only after the transient service
+stops and measured network bytes are committed to the cumulative ledger**.
+It prints a sanitized `PROBE_FAILED: CODE` line on a nonzero worker exit.
+A failure receipt cannot authorize metadata equivalence; missing/untrusted
+failure evidence explicitly yields `WORKER_REASON_UNAVAILABLE`.
+Uncontrolled exits and cgroup time/cutoff interruptions remain failures.
+
+**New offline checks:** 9 regression tests were added to the previously
+verified 426-test suite, bringing the expected count to **435 tests**.
+The controller and worker changes are **not installed** or verified on
+the workstation yet. First run the offline suite, then explicitly
+reinstall the root-owned manual service. Do not start any additional live
+comparison without a new decision that the diagnostic value justifies
+its metered Apple traffic.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
 `python3 -m unittest discover -s tests -q` and
 `python3 scripts/drive_metered.py status`. Current expected count is
-**426 tests**; confirm it from the actual workstation output. No Apple
+**435 tests**; confirm it from the actual workstation output. No Apple
 requests or system changes happen in this step.
 
 **Step B — deliberate static installation, only after tests pass.**
