@@ -48,10 +48,18 @@ class MeteredLauncherTests(unittest.TestCase):
         copied = {target.name for _, target in installer.COPIES}
         self.assertEqual(copied, {
             'metered_drive_inventory_trial.py', 'drive_meter_budget.py',
+            'metered_drive_batch_probe.py',
             'apple-sync-drive-metered-manual.service',
             'apple-sync-drive-metered-single.service',
+            'apple-sync-drive-batch-probe.service',
             '49-apple-sync-drive-metered.rules',
         })
+        self.assertEqual(
+            dict(installer.COPIES)['scripts/metered_drive_batch_probe.py'],
+            installer.LIBEXEC / 'metered_drive_batch_probe.py')
+        self.assertEqual(
+            dict(installer.COPIES)['packaging/apple-sync-drive-batch-probe.service'],
+            installer.PROBE_UNIT)
         for _, destination in installer.COPIES:
             self.assertTrue(str(destination).startswith(('/usr/local/',
                                                          '/etc/')))
