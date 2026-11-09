@@ -1,9 +1,10 @@
-// Only the active local desktop user may START either of these exact root-owned
-// metered inventory unit, never alter its definition or manage other units.
+// Only the active local desktop user may START the exact root-owned
+// metered inventory or batch probe units, never alter their definitions.
 polkit.addRule(function(action, subject) {
     if (action.id === "org.freedesktop.systemd1.manage-units" &&
         (action.lookup("unit") === "apple-sync-drive-metered-manual.service" ||
-         action.lookup("unit") === "apple-sync-drive-metered-single.service") &&
+         action.lookup("unit") === "apple-sync-drive-metered-single.service" ||
+         action.lookup("unit") === "apple-sync-drive-batch-probe.service") &&
         action.lookup("verb") === "start" &&
         subject.user === "sguzman" &&
         subject.local && subject.active) {
