@@ -119,12 +119,46 @@ Before any Apple network experiment:
    exactly the existing checkpoint semantics, fail-closed rules and fallback
    to the unmodified one-folder reader.
 
+## Live probe #1: measured but journal evidence missing (2026-11-08)
+
+The first explicitly authorized comparison consumed **232,137 measured bytes**
+(178,312 ingress, 53,825 egress). The cumulative ledger safely advanced
+to **51,492,554 bytes used**, **48,507,446 remaining**, **67 passes**,
+`pending=no`. The archive checkpoint remained **1,606 folders complete,
+1,420 pending, 10,455 records saved**.
+
+The transient worker reported a zero exit status to its root controller;
+however the user could not find a `PROBE_EQUIVALENCE` line in system journal
+output. A worker exit alone should not serve as retained equivalence evidence.
+We therefore **do not claim that comparison is independently verified**.
+Do not rerun this version merely to check journal delivery.
+
+The revised worker now writes a tiny, private result receipt under an
+ephemeral mode-0700 directory in `/run/user/<uid>/`, containing only
+aggregate counts, zero checkpoint writes, and `equivalent=true`.
+It does this only after identity comparison and checkpoint-hash verification.
+The root controller first stops the transient worker cgroup and commits
+observed traffic to the same cumulative ledger, then accepts the receipt
+**only when worker exit status is zero and the receipt has the exact
+expected schema, ownership, permissions and counts**. A missing, invalid,
+or untrusted receipt yields an explicit failed result, even if the worker
+exited zero. The file is cleaned up after the run. No backup media, cloud
+secrets, folder names or Drive identifiers are written. Transient systemd
+stdout/stderr are also explicitly sent to the journal for supplementary
+diagnostics; journal delivery is no longer the proof channel.
+
+These changes are **not yet tested on the user's workstation or reinstalled
+in the root-owned controller**. Do not start a second live probe until
+the updated test suite passes and a separate explicit installer invocation
+refreshes the static service controller. They do not alter the existing
+one-/eight-pass scanner definitions.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
 `python3 -m unittest discover -s tests -q` and
 `python3 scripts/drive_metered.py status`. Current expected count is
-**374 tests**; confirm it from the actual workstation output. No Apple
+**380 tests**; confirm it from the actual workstation output. No Apple
 requests or system changes happen in this step.
 
 **Step B — deliberate static installation, only after tests pass.**
