@@ -114,7 +114,8 @@ class MeteredProbeTests(unittest.TestCase):
                            return_value=contextlib.nullcontext(Path('/tmp/fake-probe'))),
               patch.object(controller, 'read_receipt', return_value={
                   'folders_matched': 2, 'entries_matched': 1,
-                  'files_matched': 1, 'directories_matched': 0}),
+                  'files_matched': 1, 'directories_matched': 0,
+                  'core_fields_verified': True, 'timestamps_verified': True}),
               patch.object(controller, 'metered_sample',
                            side_effect=lambda *a, **kw:
                            (events.append('worker'), (100, 200, 0))[1]),
@@ -190,7 +191,9 @@ class MeteredProbeTests(unittest.TestCase):
             directory = Path(temp)
             directory.chmod(0o700)
             receipt = {
-                'version': 1, 'equivalent': True, 'folders_matched': 2,
+                'version': 2, 'equivalent': True,
+                'core_fields_verified': True, 'timestamps_verified': True,
+                'folders_matched': 2,
                 'entries_matched': 3, 'files_matched': 2,
                 'directories_matched': 1, 'checkpoint_writes': 0,
                 'checkpoints_advanced': 0,
@@ -212,13 +215,43 @@ class MeteredProbeTests(unittest.TestCase):
                     controller.read_receipt(directory)
                 path = directory / controller.RECEIPT_NAME
                 path.write_text(json.dumps({
-                    'version': 1, 'equivalent': True, 'folders_matched': 2,
+                    'version': 2, 'equivalent': True,
+                'core_fields_verified': True, 'timestamps_verified': True,
+                'folders_matched': 2,
                     'entries_matched': 1, 'files_matched': 1,
                     'directories_matched': 0, 'checkpoint_writes': 1,
                     'checkpoints_advanced': 0,
                 }))
                 path.chmod(0o600)
                 with self.assertRaisesRegex(controller.ProbeMeterError, 'RECEIPT_INVALID'):
+                    controller.read_receipt(directory)
+
+    def test_identity_only_receipt_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            directory.chmod(0o700)
+            receipt = {
+                'version': 2, 'equivalent': True,
+                'core_fields_verified': False, 'timestamps_verified': False,
+                'folders_matched': 2, 'entries_matched': 3, 'files_matched': 2,
+                'directories_matched': 1, 'checkpoint_writes': 0,
+                'checkpoints_advanced': 0,
+            }
+            path = directory / controller.RECEIPT_NAME
+            path.write_text(json.dumps(receipt))
+            path.chmod(0o600)
+            user = Mock(pw_uid=os.getuid(), pw_gid=os.getgid())
+            with patch.object(controller.pwd, 'getpwnam', return_value=user):
+                with self.assertRaisesRegex(controller.ProbeMeterError,
+                                            'RECEIPT_INVALID'):
+                    controller.read_receipt(directory)
+            receipt['core_fields_verified'] = True
+            receipt['timestamps_verified'] = True
+            receipt['version'] = 1
+            path.write_text(json.dumps(receipt))
+            with patch.object(controller.pwd, 'getpwnam', return_value=user):
+                with self.assertRaisesRegex(controller.ProbeMeterError,
+                                            'RECEIPT_INVALID'):
                     controller.read_receipt(directory)
 
     def test_zero_exit_without_receipt_returns_failure_after_accounting(self):
@@ -256,8 +289,8 @@ class MeteredProbeTests(unittest.TestCase):
         raw = ('Sensitive folder FOLDER::private::secret\n'
                'PROBE_FAILED: PROBE_COMPARE_FAILED\n'
                'PROBE_EQUIVALENCE: equivalent=yes, folders=2, entries=3, '
-               'files=2, dirs=1, checkpoint_writes=0; bandwidth '
-               'evaluated by root ledger separately')
+               'files=2, dirs=1, checkpoint_writes=0; core_fields_verified=yes; '
+               'timestamps_verified=yes; bandwidth evaluated by root ledger separately')
         response = Mock(returncode=0, stdout=raw)
         with (patch.object(controller.baseline, 'run', return_value=response),
               contextlib.redirect_stdout(io.StringIO()) as out):
