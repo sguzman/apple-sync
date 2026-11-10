@@ -85,7 +85,7 @@ class ReadOnlyComparisonTests(unittest.TestCase):
             listed = deepcopy(references(folder))
             listed[0]['ModTime'] = '2026-11-09T11:50:01Z'
             return listed
-        with self.assertRaisesRegex(probe.BatchProbeError, 'PROBE_TIMESTAMP_MISMATCH'):
+        with self.assertRaisesRegex(probe.BatchProbeError, 'PROBE_TIMESTAMP_FILE_VALUE_MISMATCH'):
             probe.compare_readonly(
                 checkpoint(), read_native=replies, read_legacy=wrong_date,
                 backup_busy=lambda: False, require_core_fields=True)
@@ -93,6 +93,40 @@ class ReadOnlyComparisonTests(unittest.TestCase):
             checkpoint(), read_native=replies, read_legacy=wrong_date,
             backup_busy=lambda: False)
         self.assertFalse(basic['timestamps_verified'])
+
+    def test_strict_mode_classifies_equivalent_timezone_without_accepting_it(self):
+        def different_timezone(folder):
+            listed = deepcopy(references(folder))
+            listed[0]['ModTime'] = '2026-11-09T05:50:00-06:00'
+            return listed
+        with self.assertRaisesRegex(
+                probe.BatchProbeError, 'PROBE_TIMESTAMP_REPRESENTATION_MISMATCH'):
+            probe.compare_readonly(
+                checkpoint(), read_native=replies, read_legacy=different_timezone,
+                backup_busy=lambda: False, require_core_fields=True)
+
+    def test_strict_mode_classifies_nanosecond_difference(self):
+        def different_fraction(folder):
+            listed = deepcopy(references(folder))
+            listed[0]['ModTime'] = '2026-11-09T11:50:00.000000001Z'
+            return listed
+        with self.assertRaisesRegex(
+                probe.BatchProbeError, 'PROBE_TIMESTAMP_SUBSECOND_MISMATCH'):
+            probe.compare_readonly(
+                checkpoint(), read_native=replies, read_legacy=different_fraction,
+                backup_busy=lambda: False, require_core_fields=True)
+
+    def test_strict_mode_invalid_reference_timestamp_is_unverified(self):
+        def invalid(folder):
+            listed = deepcopy(references(folder))
+            listed[0]['ModTime'] = 'private-secret'
+            return listed
+        with self.assertRaisesRegex(
+                probe.BatchProbeError, 'PROBE_TIMESTAMP_UNVERIFIED') as raised:
+            probe.compare_readonly(
+                checkpoint(), read_native=replies, read_legacy=invalid,
+                backup_busy=lambda: False, require_core_fields=True)
+        self.assertNotIn('private-secret', str(raised.exception))
 
     def test_strict_mode_rejects_missing_reference_modtime(self):
         def incomplete(folder):
