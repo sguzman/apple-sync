@@ -873,6 +873,20 @@ invalid context fails before opening the cumulative ledger.
 CLI activation, new service, Apple traffic, or installer
 changes are involved.
 
+**APPLE-SYNC QA RUN #847** verified **847/847 offline tests**
+at commit `e4b133e`. A new disconnected
+`drive_batch_replay_root_executor.py` stages a root-only
+command transport boundary with fixed executable paths,
+an isolated environment, strict six-command allowlist
+and sanitized/bounded responses. It has **no subprocess
+runner or CLI**, and the existing root wiring still requires
+an explicitly injected executor; none is installed.
+**30 mock-only tests** bring the expected full suite to
+**877, not yet workstation-verified**. The root code
+manifest has 13 controller and 21 worker modules.
+Live replay, installation, timers, archive, checkpoint
+and bandwidth ledger remain unchanged.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
