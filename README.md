@@ -799,6 +799,18 @@ expected suite to **705 (not yet workstation-verified)**.
 The live replay worker remains disabled and no root service
 has been installed.
 
+**APPLE-SYNC QA RUN #705** verified **705/705 offline tests**
+at commit `9b6b861`. A new detached
+`drive_batch_replay_worker_entry.py` composes the actual-process
+preflight, one read-only replay, and sanitized version-1
+observation/failure receipts. It remains **unwired and
+unexecutable from the worker CLI**, which still prints
+`REPLAY_WORKER_DORMANT`. **20 new mock-only tests** bring the
+expected full suite to **725, not yet workstation-verified**.
+The trusted root-owned controller and worker activation are
+still separate unfinished gates; no live request or service
+installation was performed.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
