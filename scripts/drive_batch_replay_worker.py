@@ -178,6 +178,21 @@ def publish_observation(result: dict, *, directory: Path) -> None:
             or result['measured_ip_bytes'] is not None
             or result['ip_accounting_verified'] is not False):
         raise ReplayWorkerError('REPLAY_RESULT_INVALID')
+    # A type-valid receipt is still untrusted if its fixed outcome
+    # contradicts the aggregate counts. Never publish an observation whose
+    # own evidence would imply a different classification.
+    batch_only = result['directory_children_batch_only_difference']
+    single_changed = result['directory_children_single_read_difference']
+    if batch_only and single_changed:
+        expected_outcome = 'REPLAY_MIXED_DIFFERENCES_OBSERVED'
+    elif batch_only:
+        expected_outcome = 'REPLAY_BATCH_ONLY_DIFFERENCE_OBSERVED'
+    elif single_changed:
+        expected_outcome = 'REPLAY_SINGLE_READS_DIFFER_OBSERVED'
+    else:
+        expected_outcome = 'REPLAY_ALL_DIRECTORY_TIMESTAMPS_IDENTICAL'
+    if result['outcome'] != expected_outcome:
+        raise ReplayWorkerError('REPLAY_RESULT_INVALID')
     receipt = {
         'version': 1,
         'kind': 'observation',
