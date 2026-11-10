@@ -1355,12 +1355,64 @@ activation, approved installation, real bounded subprocess
 runner and full failure-path QA remain unfinished. No live
 Apple traffic or privilege installation was performed.
 
+## Detached transport-to-accounting wiring (2026-11-10)
+
+The user's **APPLE-SYNC QA RUN #877** fast-forwarded to
+`01604ad` and verified **877/877 offline tests passed**
+in **4.735 seconds**, exit 0. This verifies the
+dormant transport facade, **not** the new wiring integration.
+
+Added `drive_batch_replay_root_wiring.run_wired_with_transport`,
+an **offline-injected, non-CLI** composition binding the
+already-reviewed `ReplayExecutorBoundary` to
+`run_wired` and its existing
+`ReplayCommandPolicy` and accounting state machine.
+This helper checks its own root EUID before creating the
+boundary, opening the ledger, or contacting any callback.
+It requires explicit caller-provided `invoke` and
+uses no subprocess implementation or default runner.
+
+When used in tests, this establishes both
+(1) an exact six-command argv/timeout gate inside root
+wiring and (2) the executor boundary's independent
+root identity, command allowlist, pinned
+`/usr/bin/systemd-run` or `/usr/bin/systemctl`
+paths, freshly isolated environment and output validation.
+The same fixed uid/pid/receipt directory context binds
+both layers. Invalid context fails before the ledger is
+opened; nonroot execution fails before the transport is
+constructed. The result still goes through the existing
+non-authorizing accounting result checks.
+
+Added **20 mock-only integration tests** in
+`tests/test_drive_batch_replay_transport_integration.py`,
+covering six allowed operations, zero-traffic preflight
+ordering, private channel and protected worker command,
+fixed environment, no forwarded stderr, root refusal,
+invalid context and foreign commands, secret-bearing
+exceptions and invalid systemd property parsing.
+These tests supply fake callbacks and fake ledgers only;
+they do not start systemd or contact Apple.
+
+**Expected next suite: 897 tests** (877 last verified
++20 new tests); **not yet workstation-verified**.
+
+The original manual installer and services were unchanged.
+No new root service, Polkit rule, recurring timer,
+real subprocess executor, Apple network request, archive
+mutation, checkpoint write or budget transaction was
+performed. The replay worker's CLI remains intentionally
+dormant. Before future approval of a live manual
+experiment, additional security and failure-path
+verification and a genuinely bounded trusted runner
+are required; soft IP accounting is not a hard quota.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
 `python3 -m unittest discover -s tests -q` and
 `python3 scripts/drive_metered.py status`. Current expected count is
-**877 tests**; confirm it from the actual workstation output. No Apple
+**897 tests**; confirm it from the actual workstation output. No Apple
 requests or system changes happen in this step.
 
 **Step B — deliberate static installation, only after tests pass.**
