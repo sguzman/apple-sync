@@ -41,11 +41,12 @@ class RootTrustTests(unittest.TestCase):
 
     def test_each_module_is_present_and_named_once(self):
         names = trust.ROOT_REPLAY_MODULES
-        self.assertEqual(len(names), 10)
+        self.assertEqual(len(names), 11)
         self.assertEqual(len(set(names)), len(names))
         self.assertIn('drive_meter_budget.py', names)
         self.assertIn('drive_batch_replay_lifecycle.py', names)
         self.assertIn('drive_batch_replay_root_trust.py', names)
+        self.assertIn('drive_batch_replay_root_bootstrap.py', names)
 
     def test_user_writable_checkout_is_not_the_install_target(self):
         self.assertEqual(
