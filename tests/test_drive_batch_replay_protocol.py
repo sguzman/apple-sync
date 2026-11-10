@@ -178,7 +178,27 @@ class ReplayProtocolTests(unittest.TestCase):
                 'REPLAY_UNVERIFIED_NATIVE_RESPONSE'):
             protocol.run_bracketed(
                 progress(), read_native=reader, backup_busy=lambda: False)
-        self.assertEqual(len(seen), 3)
+        self.assertEqual(len(seen), 2)
+
+    def test_invalid_first_response_stops_before_batch(self):
+        responses = native_replies()
+        responses[0][0]['items'][0].pop('dateModified')
+        reader, seen = callbacks(responses)
+        with self.assertRaisesRegex(
+                protocol.ReplayProtocolError, 'REPLAY_UNVERIFIED_NATIVE_RESPONSE'):
+            protocol.run_bracketed(
+                progress(), read_native=reader, backup_busy=lambda: False)
+        self.assertEqual(len(seen), 1)
+
+    def test_invalid_batch_response_stops_before_final_single(self):
+        responses = native_replies()
+        responses[1][1]['items'][0]['assetQuota'] = 'bad'
+        reader, seen = callbacks(responses)
+        with self.assertRaisesRegex(
+                protocol.ReplayProtocolError, 'REPLAY_UNVERIFIED_NATIVE_RESPONSE'):
+            protocol.run_bracketed(
+                progress(), read_native=reader, backup_busy=lambda: False)
+        self.assertEqual(len(seen), 2)
 
     def test_changed_directory_identity_is_rejected_without_details(self):
         replies = native_replies(batch=NEW)
