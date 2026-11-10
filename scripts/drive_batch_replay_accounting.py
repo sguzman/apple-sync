@@ -176,19 +176,11 @@ def run_accounted(*, ledger: object, unit: str,
             return {**base, 'status': 'REPLAY_WORKER_FAILED_UNVERIFIED'}
         return {**base, 'status': 'REPLAY_WORKER_FAILED', 'code': code}
     try:
-        receipt = read_observation()
+        # Apply exactly the same full schema the root-side file reader uses
+        # even if a future wrapper accidentally wires a weaker callback.
+        from metered_drive_batch_replay import validate_observation_data
+        receipt = validate_observation_data(read_observation())
     except Exception:
-        return {**base, 'status': 'REPLAY_OBSERVATION_UNVERIFIED'}
-    # The future root wrapper must bind read_observation to the strict
-    # root receipt validator. Revalidate the key status here to ensure
-    # even a misplaced callback cannot claim a production equivalence.
-    from metered_drive_batch_replay import OBSERVATION_OUTCOMES
-    if (type(receipt) is not dict
-            or receipt.get('kind') != 'observation'
-            or type(receipt.get('outcome')) is not str
-            or receipt['outcome'] not in OBSERVATION_OUTCOMES
-            or receipt.get('production_commit_authorized') is not False
-            or receipt.get('checkpoint_writes') != 0):
         return {**base, 'status': 'REPLAY_OBSERVATION_UNVERIFIED'}
     return {**base, 'status': 'REPLAY_OBSERVATION',
             'outcome': receipt['outcome']}
