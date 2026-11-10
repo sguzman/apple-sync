@@ -132,8 +132,8 @@ def run_accounted(*, ledger: object, unit: str,
             # only if stop+final counters are independently verified.
             pass
         finally:
-            # Stop is mandatory even if systemd-run may have partially
-            # accepted a unit before returning an error.
+            # Stop is mandatory even if the transient service launcher
+            # partially accepted a unit before returning an error.
             try:
                 stop_worker()
                 ingress, egress, active, substate, _status = _snapshot(
