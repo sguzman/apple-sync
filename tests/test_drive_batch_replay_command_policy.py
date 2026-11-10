@@ -184,7 +184,7 @@ class ReplayCommandPolicyTests(unittest.TestCase):
                       trust.ROOT_REPLAY_MODULES)
         self.assertNotIn('drive_batch_replay_command_policy.py',
                          trust.ROOT_WORKER_MODULES)
-        self.assertEqual(len(trust.ROOT_REPLAY_MODULES), 12)
+        self.assertEqual(len(trust.ROOT_REPLAY_MODULES), 13)
 
     def test_source_has_no_live_executor_or_cli(self):
         code = Path(policy.__file__).read_text(encoding='utf-8')
