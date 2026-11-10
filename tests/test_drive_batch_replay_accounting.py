@@ -169,6 +169,10 @@ class AccountingTests(unittest.TestCase):
     def test_invalid_observation_does_not_claim_success(self):
         for bad in (
                 {'kind': 'equivalence'},
+                {'equivalent': True},
+                {'timestamps_verified': True},
+                {'directory_children_checked': 3},
+                {'outcome': 'REPLAY_ALL_DIRECTORY_TIMESTAMPS_IDENTICAL'},
                 {'production_commit_authorized': True},
                 {'checkpoint_writes': 1},
                 {'outcome': 'secret/private/file'},
