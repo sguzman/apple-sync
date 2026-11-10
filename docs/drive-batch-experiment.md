@@ -1100,12 +1100,62 @@ verification alone is neither a network quota nor permission
 to execute the replay. No live Apple call, inventory checkpoint,
 timer, service or budget was touched during this code-only stage.
 
+## Diagnostic-only isolated root bootstrap (2026-11-10)
+
+The user's labeled **APPLE-SYNC QA RUN #750** fast-forwarded to
+`853399b` and **750/750 offline tests passed**, in **3.647 seconds**,
+exit 0. This verifies the root-code trust helper, **not** the new
+bootstrap.
+
+Added `scripts/drive_batch_replay_root_bootstrap.py` as a
+**diagnostic-only, not-installed** privileged-code bootstrap.
+The sole supported action is exactly `doctor`; an argument such as
+`run`, `start`, `install` or `--execute` is explicitly refused.
+There is **no worker invocation, real command executor, ledger
+operation, Apple request, or service installation** in this module.
+
+A future separately approved root-owned static service may start
+`/usr/bin/python3 -I -S -B` against the fixed root-owned
+`/usr/local/libexec/apple-sync-drive-metered/drive_batch_replay_root_bootstrap.py`.
+The bootstrap checks root EUID, exact interpreter/script path, and
+isolated/no-site/no-bytecode Python flags. It then walks the installed
+root-owned path via `O_NOFOLLOW` directory fds and checks that both
+the bootstrap itself and its verifier are regular, single-link,
+root-owned, non-group/world-writable files, **before** importing the
+verifier from that fixed location. The verifier subsequently checks
+the entire root-side module manifest. That manifest now includes
+the bootstrap and has **11 required Python modules**.
+
+The existing `install_metered_launcher.py`, existing service files,
+Polkit permissions, and all installed services were deliberately left
+unchanged. The bootstrap is not installed; no privileged action
+can be initiated from this development step. It is a **trust and
+diagnostics prerequisite only**, never permission for live Apple
+traffic. The future replay worker and root controller execution
+path are still disabled.
+
+Added **27** new offline-only tests in
+`tests/test_drive_batch_replay_root_bootstrap.py`, exercising strict
+`doctor`-only policy, Python isolation, root UID and fixed locations,
+missing or unsafe seed code, symlinks, permissions and hardlinks,
+ordered verification, sanitized failures and no Apple or systemd
+activation. Updated the existing root-trust test to require the
+11-file manifest. The next **expected** full suite is **777 tests**
+(750 last verified +27), **not yet workstation-verified**.
+
+**Remaining before any manual replay:** a full offline safety review
+of the root-controlled executable bindings, worker code path
+immutability, controlled installation and complete failure recovery;
+and explicit user approval before any installation or Apple network
+request. The cumulative IP budget remains an advisory, measured
+limit rather than a kernel-enforced hard cap.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
 `python3 -m unittest discover -s tests -q` and
 `python3 scripts/drive_metered.py status`. Current expected count is
-**750 tests**; confirm it from the actual workstation output. No Apple
+**777 tests**; confirm it from the actual workstation output. No Apple
 requests or system changes happen in this step.
 
 **Step B — deliberate static installation, only after tests pass.**
