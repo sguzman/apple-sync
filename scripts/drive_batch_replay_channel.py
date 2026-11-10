@@ -167,6 +167,7 @@ def _create_at_fd(runtime_fd: int, *, uid: int, gid: int,
         raise ReplayChannelError('REPLAY_CHANNEL_NAME_INVALID')
     created = False
     opened = None
+    completed = False
     try:
         os.mkdir(name, mode=0o700, dir_fd=retained)
         created = True
@@ -179,14 +180,15 @@ def _create_at_fd(runtime_fd: int, *, uid: int, gid: int,
             path=runtime_path / name, name=name, uid=uid)
         if not lease._same_entry():
             raise ReplayChannelError('REPLAY_CHANNEL_CHANGED')
+        completed = True
         return lease
     except ReplayChannelError:
         raise
     except OSError:
         raise ReplayChannelError('REPLAY_CHANNEL_CREATION_FAILED') from None
     finally:
-        # Only the successful lease takes ownership of both descriptors.
-        if 'lease' not in locals():
+        # Only a fully verified, returned lease takes fd ownership.
+        if not completed:
             if opened is not None:
                 os.close(opened)
             if created:
