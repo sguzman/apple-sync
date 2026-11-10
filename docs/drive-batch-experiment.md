@@ -405,6 +405,65 @@ read versus batched reads, ensuring all traffic is metered and results
 remain private. Until then retain the original one-folder scanner and
 the batch write gate closed.
 
+## Offline bracketing replay after directory-second mismatch (2026-11-10)
+
+Implemented `scripts/drive_batch_replay.py` as a **pure in-memory**
+diagnostic that consumes already-supplied, synthetic or separately
+authorized native API replies. It cannot open sockets, execute subprocesses,
+download anything, read accounts, or save progress. The
+`tests/test_drive_batch_replay.py` suite adds **16** regression tests
+to the last workstation-verified **459**, so the **expected new total is
+475 tests, not yet workstation-verified**.
+
+### How to interpret an offline replay
+
+For two validated folder IDs, the helper examines **one target folder**
+from this chronological three-observation sequence:
+
+1. **S0**: native single-folder response for the target folder
+2. **B**: native two-folder response containing that same target folder
+3. **S1**: native single-folder response for the same target folder
+
+It rejects malformed envelopes; changes to child IDs, directory ETags,
+non-timestamp core fields, or unsafe/incomplete timestamp values. It compares
+the **same direct child directory IDs** across all three responses.
+
+- **S0 = B = S1:** sampled directory time strings remained identical
+- **S0 = S1 but B differs:** batch-only difference **observed**, which may
+  also reflect a transient change followed by a reversion
+- **S0 differs from S1:** single readings differ **observed**, which may
+  reflect metadata updates or inconsistent API replies
+- **Different directories exhibit different patterns:** mixed observations;
+  do not infer a single cause
+
+These are **observational categories, not root-cause proofs**. Anonymous
+counts and fixed codes are the only outputs. Raw timestamps, private paths
+and Drive IDs are **not persisted**. No replay outcome approves metadata
+equivalence or checkpoint writes.
+
+### Minimum *future* metered experiment — NOT authorized or implemented
+
+To test whether a batch-versus-single difference reproduces on the account,
+a separate, explicitly authorized manual mode could perform the chronological
+**S0 / B / S1** comparison above, with an additional ordinary rclone RC
+listing of the same folder if necessary to connect the result to the
+original rclone mismatch. Even these observations would not fully rule out
+a transient update between requests.
+
+The experiment would need its **own offline-tested worker and private
+failure/success receipt contract**, run under the **existing root-owned
+cumulative IP ledger** and one stopped/verified systemd cgroup, retain
+backup-idle checks and the existing exclusive archive lock, respect the
+sampled traffic cutoff as a **soft** cutoff (never a hard quota), hash the
+checkpoint before and after, and publish only aggregate category counts
+after traffic is durably committed. Abort if the target has no directory
+children or if any metadata/identity check fails. **Do not add it to the
+current launcher or invoke Apple merely to exercise the offline helper.**
+
+Current state remains **72 measured passes, 47,592,221 bytes remaining,
+pending=no; 1,606 folders completed and 1,420 pending**. No new Apple
+traffic or production scanner change was made in this step.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
