@@ -1294,12 +1294,73 @@ with restricted environment, checked code tree and complete
 failure-path validation. The 100 MB limit is measured,
 not kernel-enforced.
 
+## Dormant root command-transport facade (2026-11-10)
+
+The user's labeled **APPLE-SYNC QA RUN #847** fast-forwarded to
+`e4b133e` and verified **847/847 offline tests passed**, in
+**4.209 seconds** with exit 0. That validates policy enforcement
+inside the mocked root wiring, **not** the new facade.
+
+Added `scripts/drive_batch_replay_root_executor.py`, an
+**uninstalled and disconnected** root-only facade for the
+separately authorized manual replay controller. It has
+**no built-in subprocess runner, no executable CLI, no
+systemd service and no ledger or Apple access**. It requires
+a caller-supplied command callback, for which tests only
+provide recording fakes. It checks `geteuid()==0` and
+validates the exact argv/timeout against the six-command
+`ReplayCommandPolicy` **before** forwarding anything to
+that callback. It then transforms the two permitted command
+programs to fixed absolute paths
+`/usr/bin/systemd-run` and `/usr/bin/systemctl`, and
+constructs a new fixed environment each time (`PATH`,
+`HOME`, `LANG`, `LC_ALL` and `PYTHONNOUSERSITE`) rather
+than inheriting root/system user environment, Python overrides
+or cloud secrets.
+
+Return handling requires an exact integer success exit code,
+string stdout/stderr each bounded to 4096 characters and
+NUL-free. For `systemctl show`, the existing exact-seven-field
+systemd parser must accept the stdout before it is returned
+to the existing accounting adapter; every other operation
+returns empty stdout. The raw stderr is **never** forwarded
+in the return object. Any callback exception, unsafe output,
+failed status or untrusted command produces a fixed sanitized
+error without including private command text or credentials.
+
+**Important limitation:** an eventual *real* root subprocess
+runner, if separately approved, must independently use
+`shell=False`, `close_fds=True`, an exact supplied environment,
+fixed executable paths, timeouts and **bounded capture while
+the process is running**. The post-return bounds in this
+facade alone do **not** prevent a malicious/hung subprocess
+from producing unlimited output or consuming resources.
+Neither this facade nor passing its input checks constitutes
+live execution authorization, proof of IPAccounting, or
+permission to resume the inventory.
+
+The root-owned code trust manifest now includes the facade
+(**13 root modules +21 worker modules**). Existing
+manifest-count tests were updated; **30 new mock-only tests**
+in `tests/test_drive_batch_replay_root_executor.py`
+cover the fixed environment, allowlisted commands, path
+substitution, hostile output and sanitized failures.
+Expected next full suite: **877 tests** (847 previously
+verified +30), **not yet workstation-verified**.
+
+The original manual metered installer, systemd units, timers,
+Polkit rules, shared metering ledger, checkpoint and replay
+worker CLI were not changed. Root controller production
+activation, approved installation, real bounded subprocess
+runner and full failure-path QA remain unfinished. No live
+Apple traffic or privilege installation was performed.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
 `python3 -m unittest discover -s tests -q` and
 `python3 scripts/drive_metered.py status`. Current expected count is
-**847 tests**; confirm it from the actual workstation output. No Apple
+**877 tests**; confirm it from the actual workstation output. No Apple
 requests or system changes happen in this step.
 
 **Step B — deliberate static installation, only after tests pass.**
