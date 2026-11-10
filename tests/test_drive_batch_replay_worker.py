@@ -228,6 +228,7 @@ class ReplayWorkerTests(unittest.TestCase):
         invalid = (
             {'outcome': 'OTHER'},
             {'outcome': ['unhashable']},
+            {'outcome': 'REPLAY_ALL_DIRECTORY_TIMESTAMPS_IDENTICAL'},
             {'directory_children_checked': 1},
             {'directory_children_stable': -1},
             {'directory_children_batch_only_difference': 2},
