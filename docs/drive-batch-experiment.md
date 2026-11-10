@@ -464,6 +464,44 @@ Current state remains **72 measured passes, 47,592,221 bytes remaining,
 pending=no; 1,606 folders completed and 1,420 pending**. No new Apple
 traffic or production scanner change was made in this step.
 
+## Offline replay sequencing gate (2026-11-10)
+
+The user's workstation fast-forwarded to `dd9d7c0` and **all 475 offline
+tests passed** in 4.050 seconds. This confirms the earlier *pure comparison*
+helper works on the user's system. It does not prove a live replay.
+
+Added a **separate, uninstalled and unexecutable-on-its-own**
+`scripts/drive_batch_replay_protocol.py`. It accepts a deep copy of the
+existing checkpoint, selects the **first two distinct pending folder IDs**,
+and calls an injected `read_native` callback in this exact order:
+`[A]` → `[A,B]` → `[A]`. Each of the three replies is independently
+validated and converted **before** a following request is permitted.
+Each read is surrounded by fail-closed backup-idleness checks. A busy
+backup, unknown status, malformed response, missing second folder, or
+private callback exception prevents further reads; errors are fixed
+category strings. The comparison delegates to `drive_batch_replay.py`
+and returns anonymous observational counts with
+`ip_accounting_verified=False`, `measured_ip_bytes=None`,
+`checkpoint_writes=0`, `checkpoints_advanced=0`,
+`production_commit_authorized=False`.
+
+The new `tests/test_drive_batch_replay_protocol.py` contains **18**
+offline regression tests, including early abort after an invalid first
+or second response, request ordering, backup activation at each phase,
+checkpoint immutability, callback failure sanitization, and metadata
+identity checks. The expected next suite is **493 tests** (475 previously
+passed +18); the new version is **not workstation-tested yet**.
+
+**Important boundary:** This is just an offline, callback-driven
+sequencer. It is not installed as a root service, not exposed through
+the existing Polkit launcher, not counted as a live bandwidth check, and
+does not authorize another Apple probe. Before any real traffic,
+implement and offline-test a dedicated worker and root-owned controller,
+with its own versioned private result contract, total wall-clock and
+per-request timeouts, existing exclusive cumulative IP ledger and backup
+locks, checkpoint SHA-256 verification and no-write guarantees.
+A separately approved manual launch would still be necessary.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
