@@ -674,6 +674,16 @@ offline tests bring the **expected** suite count from the last verified
 migration, checkpoint writes or new metered services were performed.
 A future live replay needs separate explicit authorization and safety tests.
 
+The standalone bracketing replay has now passed all **475 workstation
+tests**. A separate offline-only replay protocol enforces **[A] → [A,B]
+→ [A]** and checks backup idleness and each native response before
+allowing another read. Its **18 new offline regression tests** make the
+next expected count **493**, not yet workstation-verified. No live
+worker or privileged service was installed; the replay sequencer cannot
+contact Apple by itself. A dedicated metered service, restricted receipt
+contract, checkpoint integrity checks, and **new explicit approval**
+remain prerequisites to any live use.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
