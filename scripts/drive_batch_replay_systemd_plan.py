@@ -4,7 +4,8 @@
 No subprocess, service start, Apple call, ledger operation or live CLI.
 The worker is still DORMANT and ignores --execute. The argv only names
 root-owned installed code, never the writable Git checkout; those files
-are not installed by this change. A future root-owned wrapper must verify
+are not installed by this change. -E/-s prohibit user-controlled Python
+paths and -B prevents bytecode writes. A future root-owned wrapper must verify
 receipt directory ownership, mode, absence of
 symlinks and systemd enforcement BEFORE using any returned argv.
 IPAccounting provides a sampled soft limit, NOT a hard network quota.
@@ -105,7 +106,7 @@ def worker_start_argv(unit: str, *, uid: int,
         f'--setenv=APPLE_SYNC_REPLAY_RECEIPT_DIR={receipt}',
         '--property=StandardOutput=journal',
         '--property=StandardError=journal',
-        PYTHON, '-B', str(WORKER), '--execute',
+        PYTHON, '-E', '-s', '-B', str(WORKER), '--execute',
     )
 
 
