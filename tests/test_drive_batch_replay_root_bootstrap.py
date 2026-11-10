@@ -128,7 +128,7 @@ class RootBootstrapTests(unittest.TestCase):
                 boot.validate_invocation(**invocation(**overrides))
 
     def test_bootstrap_manifest_includes_11_root_modules(self):
-        self.assertEqual(len(trust.ROOT_REPLAY_MODULES), 11)
+        self.assertEqual(len(trust.ROOT_REPLAY_MODULES), 12)
         self.assertIn(boot.BOOTSTRAP_NAME, trust.ROOT_REPLAY_MODULES)
         self.assertIn(boot.TRUST_NAME, trust.ROOT_REPLAY_MODULES)
 
