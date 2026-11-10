@@ -957,12 +957,54 @@ Expected total: **685 tests** (660 verified +25), not yet
 workstation-tested. No Apple traffic, timer, root installation,
 inventory checkpoint or bandwidth ledger change took place.
 
+## Actual-process replay worker preflight (2026-11-10)
+
+The user's labeled **QA RUN #685-FIX1** fast-forwarded to
+`19b64e3` and verified **685/685 offline tests passed** in
+**4.620 seconds** (exit 0). The prior failure was a missing-variable
+error category and is fixed. No Apple requests were initiated.
+
+Added `scripts/drive_batch_replay_worker_preflight.py`, a **dormant
+read-only process validation helper** for the future replay worker.
+Unlike the pure cgroup gate, this layer reads its own fixed
+`/proc/self/cgroup` with `O_NOFOLLOW` and a 4096-byte bound. It
+verifies real/effective unprivileged UIDs, invokes the strict replay
+unit and `INVOCATION_ID` identity gate using the actual current
+process membership, then validates ownership, mode and non-symlink
+status of `/run`, `/run/user`, the user's runtime directory and
+the private receipt channel. Every refusal uses a fixed category
+without printing private paths or raw cgroup data.
+
+**This is not a live worker entrypoint.** It does not call
+`replay_once`, modify a checkpoint, launch `rclone` or systemd,
+touch the bandwidth ledger, or authorize Apple traffic. In
+particular, a valid process identity and directory ownership are
+**necessary but insufficient** to prove the root controller's
+durable reservation, actual IPAccounting, stopped cgroup or
+cumulative 100 MB metering. The existing replay worker remains
+dormant and the new helper is not wired into a live CLI.
+
+Added **20 offline regression tests** in
+`tests/test_drive_batch_replay_worker_preflight.py` for exact
+`/proc/self/cgroup` acquisition and bounded error paths, UID
+checks, forged markers, unknown cgroups, wrong receipt locations,
+runtime component trust and no network/CLI behavior. The next
+expected suite is **705 tests** (685 verified +20), **not yet
+workstation-verified**.
+
+The remaining work before considering one separately authorized
+Apple replay is a reviewed root-owned manual controller with
+immutable executable bindings, guarded worker entrypoint, final
+offline integration QA, and explicit user approval for any
+service installation or live account access. No new live
+probe was performed.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
 `python3 -m unittest discover -s tests -q` and
 `python3 scripts/drive_metered.py status`. Current expected count is
-**685 tests**; confirm it from the actual workstation output. No Apple
+**705 tests**; confirm it from the actual workstation output. No Apple
 requests or system changes happen in this step.
 
 **Step B — deliberate static installation, only after tests pass.**
