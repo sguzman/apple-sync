@@ -144,10 +144,9 @@ def _counts_match_outcome(data: dict) -> bool:
     return data['outcome'] == category
 
 
-def read_observation(directory: Path) -> dict:
-    """Accept *only* an exact version-1 nonauthorizing observation receipt."""
-    data = read_private_receipt(directory)
-    if (set(data) != OBSERVATION_KEYS
+def validate_observation_data(data: object) -> dict:
+    """Pure exact-schema check, also required after injected controller reads."""
+    if (type(data) is not dict or set(data) != OBSERVATION_KEYS
             or type(data['version']) is not int or data['version'] != 1
             or data['kind'] != 'observation'
             or type(data['outcome']) is not str
@@ -169,6 +168,12 @@ def read_observation(directory: Path) -> dict:
             or data['production_commit_authorized'] is not False):
         raise ReplayMeterError('REPLAY_RECEIPT_INVALID')
     return data
+
+
+
+def read_observation(directory: Path) -> dict:
+    """Read a private version-1 observation; never an equivalence proof."""
+    return validate_observation_data(read_private_receipt(directory))
 
 
 def read_failure(directory: Path) -> str:
