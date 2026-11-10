@@ -502,6 +502,60 @@ per-request timeouts, existing exclusive cumulative IP ledger and backup
 locks, checkpoint SHA-256 verification and no-write guarantees.
 A separately approved manual launch would still be necessary.
 
+## Dormant replay worker and private receipt contract (2026-11-10)
+
+The workstation confirmed **493 offline tests passed** in 4.053 seconds
+after fast-forwarding to `bdef154`. The **new** replay worker added here
+has **not been run or installed on the workstation**.
+
+Added `scripts/drive_batch_replay_worker.py`, deliberately with **no
+executable Apple-contacting entrypoint** and not referenced from systemd,
+Polkit or the existing manual launcher. Direct script execution prints
+`REPLAY_WORKER_DORMANT` and exits without contacting Apple. The private
+`replay_once()` routine is staged for a future separately implemented
+root-owned cumulative-IP-metered service. It reuses the pinned experimental
+rclone binary identity check, the existing exclusive archive lock and
+backup-idle guard, loads the saved checkpoint under that lock, and verifies
+the checkpoint's SHA-256 before and after the three-read replay. The
+`RcloneRCReader` session remains private and the callback applies a
+**15-second** per-request cap. On interruption or unverifiable metadata,
+it returns only allowlisted error codes; it never saves a scanner checkpoint.
+
+A **distinct** version-1 private `replay.json` receipt contract uses
+exclusive mode-0600 files in a trusted 0700 directory and distinguishes
+`kind=observation` from `kind=failure`. An observation must have
+exactly **three completed requests**, two selected folders, valid bounded
+aggregate counts matching the claimed observational category, and
+`checkpoint_writes=0`, `checkpoints_advanced=0`, and
+`production_commit_authorized=false`. It does **not** contain raw
+timestamps, Drive IDs, filenames, an `equivalent` attestation or a
+`timestamps_verified` claim. The existing **version-2 equivalence
+receipt** is not accepted as a replay receipt and vice versa. The
+controller must validate the new receipt **only after the stopped worker's
+IP bytes have been durably accounted for**; this is still future work.
+
+Added **18** offline worker tests including lock contention, changed
+checkpoint hashes, binary identity refusal, busy backup deferral,
+sanitized protocol errors, untrusted result directories, exclusive
+private receipts, data-free failure codes and outcome/count consistency.
+The next expected full suite is **511 tests** (493 last verified +18),
+**not yet workstation-verified**. No new live probe is authorized, no
+manual service was installed, and no Apple network requests were made in
+this step.
+
+### Remaining live integration blockers
+
+Before any future replay is offered for user authorization, implement and
+offline-test an **independent root-metered controller**. It must enforce
+the original shared cumulative budget; reserve before starting work,
+measure and stop the whole transient systemd worker cgroup, reconcile
+ingress/egress before trusting a receipt, guarantee a maximum wall clock
+and timeouts, refuse enabled timers/active backups, and install its own
+strictly manual-only service and start-only Polkit permission. Do not
+reuse the strict probe's `equivalent` receipt or modify the original
+scanner's write path. The new worker's dormant routine alone does not
+establish or enforce IPAccounting.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
