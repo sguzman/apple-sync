@@ -98,6 +98,7 @@ def worker_start_argv(unit: str, *, uid: int,
         '--setenv=DBUS_SESSION_BUS_ADDRESS=unix:path='
         + runtime + '/bus',
         '--setenv=APPLE_SYNC_REPLAY_METERED=1',
+        f'--setenv=APPLE_SYNC_REPLAY_UNIT={unit}',
         f'--setenv=APPLE_SYNC_REPLAY_RECEIPT_DIR={receipt}',
         '--property=StandardOutput=journal',
         '--property=StandardError=journal',
