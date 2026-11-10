@@ -594,6 +594,72 @@ enforce stop-the-whole-cgroup and measured ledger reconciliation
 A separate permissioned manual launcher and explicit approval are
 still required before any live experiment.
 
+## Dormant root replay accounting controller (2026-11-10)
+
+The user's workstation fast-forwarded to `646b9d5` and **all 529
+offline tests passed** in 3.162 seconds. That covers the earlier
+root-side receipt reader, not this newly added controller core.
+
+Added `scripts/drive_batch_replay_accounting.py`: an **injected-only,
+dormant state machine**, with **no CLI, systemd launcher, Apple request,
+timer, Polkit rule or installed service**. It is not wired to the
+actual `replay_once` worker, so it cannot initiate a live replay on
+its own.
+
+A future separately approved root wrapper would have to supply all
+the following already-security-reviewed operations: root/setup/timer
+guard, backup-idle check, zero-traffic IPAccounting preflight, worker
+launch, bounded systemd property reads, stop-confirmed cgroup shutdown,
+monotonic clock and bounded sleep, and the strict root-side receipt
+readers. The shared `BudgetLedger` must be held under its existing
+exclusive lock for the whole operation.
+
+The staged controller checks the exact replay unit name, rejects
+unknown/busy idle state, runs the preflight before any reservation,
+calculates the existing **1,500,000-byte sampled cutoff with a
+2,000,000-byte reserve**, then calls `ledger.begin(unit)` **before**
+the launch callback. After any launch attempt it **unconditionally
+stops** the cgroup, verifies `ActiveState=inactive`,
+`SubState=dead` and final `IPAccounting=yes` ingress/egress
+counters, then durably calls `ledger.complete` **before reading
+either the observation or failure receipt**. On a stop, final-counter,
+or ledger-commit failure, it leaves the durable budget reservation
+**pending**. Interrupted/time-limited/soft-cutoff runs cannot be
+called successful, even if the worker happens to have emitted a
+success-like receipt. Its outputs contain fixed statuses, aggregate
+measured bytes, and explicitly `production_commit_authorized=false`.
+The soft cutoff is **not a hard bandwidth quota**.
+
+A new pure `validate_observation_data()` helper in the root
+receipt module is reused by the controller on **every** candidate
+observation. It rejects extra `equivalent` or private fields,
+invalid counts and contradictory outcome categories even if a
+future callback was accidentally wired to a weaker reader. The
+existing version-1 replay receipt and old version-2 strict parity
+receipt are not interchangeable.
+
+**22 additional offline tests** in
+`tests/test_drive_batch_replay_accounting.py` cover reservation
+order, confirmation that stop precedes accounting and receipt reads,
+nonzero exits, malformed/missing receipts, unknown backup states,
+no-idle defer, guard/preflight refusals, bad units, start failures,
+systemd stop failure, inactive-state and counter verification,
+interrupted polling, soft cutoff, time expiry, ledger commit failure,
+strict payload validation and the absence of a live CLI. The
+expected new suite size is **551 tests** (529 previously verified
++22), **not yet run on the user's workstation**.
+
+**Still required before actual Apple traffic:** A dedicated trusted
+root wrapper binding those injected operations to systemd and the
+existing ledger, a dedicated versioned private worker exit/receipt
+entrypoint, unit/Polkit installation with manual-only policy, a
+separate complete offline integration QA pass, and explicit approval
+for each live probe. No Apple traffic or inventory writes occurred
+in this development step, and the original inventory scanner is
+unchanged. The last known ledger is **72 passes, 47,592,221 measured
+bytes remaining, pending=no**; the saved snapshot remains
+**1,606 completed, 1,420 pending, 10,455 entries**.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
