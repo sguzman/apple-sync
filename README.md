@@ -705,6 +705,18 @@ The new root-metered execution and ledger orchestration are **still
 unimplemented** and require independent tests and explicit user
 authorization before any additional Apple traffic.
 
+The workstation now verifies **529/529 offline tests**. A dormant
+`drive_batch_replay_accounting.py` controller core has been added to
+enforce ledger reservation before launch and **confirmed cgroup stop →
+final IP counter reconciliation → durable ledger commit → private
+receipt validation**, in that strict order. It also revalidates the full
+observation schema against a mistaken weak callback. **22 new tests**
+bring the next **expected** offline suite to **551, not yet
+workstation-verified**. This module is injected-only and cannot start
+Apple traffic by itself: no trusted root wrapper, live worker entrypoint,
+manual unit, Polkit permission or timer has been added. Live execution
+still requires explicit authorization after further testing.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
