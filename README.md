@@ -887,6 +887,21 @@ manifest has 13 controller and 21 worker modules.
 Live replay, installation, timers, archive, checkpoint
 and bandwidth ledger remain unchanged.
 
+**APPLE-SYNC QA RUN #877** verified **877/877 offline tests**
+at commit `01604ad`. The dormant
+`drive_batch_replay_root_wiring.run_wired_with_transport`
+now stages the protected `ReplayExecutorBoundary`
+inside root accounting, enforcing the same exact six
+command/timeout combinations through both the command
+policy and the isolated-environment transport facade.
+It is an explicitly injected **test-only integration**:
+there is still no real subprocess runner, root execution
+CLI, installed replay service, or live Apple access.
+**20 mock-only integration tests** bring the next
+expected full suite to **897, not yet workstation-verified**.
+The existing installer, timers, checkpoints and shared
+metering ledger are unchanged.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
