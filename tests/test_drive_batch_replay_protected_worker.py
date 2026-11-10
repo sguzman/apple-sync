@@ -54,9 +54,9 @@ class ProtectedWorkerTests(unittest.TestCase):
     def test_root_and_worker_manifests_are_disjoint_and_complete(self):
         self.assertTrue(set(trust.ROOT_REPLAY_MODULES).isdisjoint(
             trust.ROOT_WORKER_MODULES))
-        self.assertEqual(len(trust.ROOT_REPLAY_MODULES), 11)
+        self.assertEqual(len(trust.ROOT_REPLAY_MODULES), 12)
         self.assertEqual(len(set(trust.ROOT_REPLAY_MODULES)
-                             | set(trust.ROOT_WORKER_MODULES)), 32)
+                             | set(trust.ROOT_WORKER_MODULES)), 33)
 
     def test_key_worker_and_preflight_modules_are_in_manifest(self):
         for name in ('drive_batch_replay_worker.py',
