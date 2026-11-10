@@ -777,6 +777,17 @@ No live worker or root service is installed; a reviewed
 manual-only entrypoint and separate Apple traffic authorization
 are still required.
 
+**APPLE-SYNC QA RUN #660** verified **660/660 offline tests**
+at `252695e`. The new `drive_batch_replay_worker_gate.py`
+stages an identity prerequisite requiring the exact systemd
+replay cgroup, transient unit, matching nonroot user and private
+receipt path; its planner sets `APPLE_SYNC_REPLAY_UNIT` for
+that match. **25 offline tests** bring the expected full suite to
+**685, not yet workstation-verified**. The worker entrypoint
+remains dormant: passing this pure gate is not proof of root
+IPAccounting, shared-ledger reservation or Apple-request
+authorization. No new service or live probe was installed or run.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
