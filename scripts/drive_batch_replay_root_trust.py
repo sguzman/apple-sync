@@ -35,6 +35,7 @@ ROOT_REPLAY_MODULES = (
     'drive_batch_replay_channel.py',
     'drive_batch_replay_root_wiring.py',
     'drive_batch_replay_command_policy.py',
+    'drive_batch_replay_root_executor.py',
     'drive_batch_replay_lifecycle.py',
     'drive_batch_replay_root_trust.py',
     'drive_batch_replay_root_bootstrap.py',
