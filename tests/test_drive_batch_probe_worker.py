@@ -128,6 +128,28 @@ class ProbeWorkerTests(unittest.TestCase):
                 worker.probe_once(binary=self.binary, state_root=self.state)
         self.assertEqual(str(caught.exception), 'PROBE_CORE_FIELD_MISMATCH')
 
+    def test_refined_timestamp_reason_survives_private_worker_receipt(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            directory.chmod(0o700)
+            env = {'INVOCATION_ID': 'test', 'APPLE_SYNC_BATCH_METERED': '1',
+                   'APPLE_SYNC_BATCH_RECEIPT_DIR': str(directory)}
+            with (patch.object(sys, 'argv', ['worker', '--execute']),
+                  patch.object(worker.os, 'geteuid', return_value=1000),
+                  patch.dict(os.environ, env, clear=True),
+                  patch.object(worker, 'probe_once',
+                               side_effect=worker.WorkerError(
+                                   'PROBE_TIMESTAMP_REPRESENTATION_MISMATCH')),
+                  contextlib.redirect_stderr(io.StringIO()) as error):
+                self.assertEqual(worker.main(), 2)
+            receipt = json.loads((directory / worker.RECEIPT_NAME).read_text())
+            self.assertEqual(receipt['outcome'], 'failed')
+            self.assertEqual(receipt['code'],
+                             'PROBE_TIMESTAMP_REPRESENTATION_MISMATCH')
+            self.assertNotIn('equivalent', receipt)
+            self.assertIn('PROBE_TIMESTAMP_REPRESENTATION_MISMATCH',
+                          error.getvalue())
+
     def test_untrusted_binary_rejected(self):
         self.binary.chmod(0o722)
         with self.assertRaisesRegex(worker.WorkerError, 'UNTRUSTED'):
