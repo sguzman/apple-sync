@@ -660,6 +660,53 @@ unchanged. The last known ledger is **72 passes, 47,592,221 measured
 bytes remaining, pending=no**; the saved snapshot remains
 **1,606 completed, 1,420 pending, 10,455 entries**.
 
+## Dormant systemd replay command planner (2026-11-10)
+
+The user's workstation fast-forwarded to `1191e72` and **all 551
+offline tests passed** in 4.119 seconds. This verifies the preceding
+injected-only metering state machine, **not** a live service.
+
+Added the pure `scripts/drive_batch_replay_systemd_plan.py`.
+It can only **construct argv tuples** for a future transient
+systemd worker, its fixed `systemctl show` and `systemctl stop`
+commands, and a separately named, zero-traffic `/usr/bin/sleep 4`
+IPAccounting preflight with its own query/stop commands. No subprocess,
+Apple network, root installation, ledger mutation or CLI is executed
+or available by importing or invoking this module.
+
+The plan pins the existing repository worker path, the unprivileged
+`sguzman` service account, `Type=exec`, `IPAccounting=yes`,
+`KillMode=control-group`, `Restart=no`, `NoNewPrivileges=yes`,
+`RuntimeMaxSec=95s`, and the exact replay-unit name pattern.
+It requires a candidate receipt directory of the form
+`/run/user/<uid>/.apple-sync-replay-<token>` and uses distinct
+`APPLE_SYNC_REPLAY_*` environment variables rather than the
+existing strict batch probe's result channel. The plan rejects
+unexpected names, invalid IDs and other directory roots.
+**Path-shape validation alone does not establish owner, 0700 permissions
+or absence of symlinks**: the eventual trusted root wrapper must
+check those properties before launching anything. The worker
+it would name **still has no live `--execute` handler** and simply
+prints `REPLAY_WORKER_DORMANT`.
+
+The **22 new tests** in
+`tests/test_drive_batch_replay_systemd_plan.py` exercise fixed
+argv properties, strict unit and runtime-directory arguments,
+preflight start/status/stop, no timers or shells, exact unprivileged
+user, and the inert worker. The next expected full suite is
+**573 tests** (551 last verified +22); these new tests have
+**not yet been workstation-executed**.
+
+**Remaining blockers:** A separate reviewed and tested worker
+entrypoint that accepts only the trusted manually started replay
+cgroup, a root-owned adapter that actually executes the fixed
+systemd plan and binds it to `run_accounted` under the existing
+exclusive `BudgetLedger`, rigorous stop/ledger/receipt integration
+tests, manual-only privileged installation and start permission,
+and new explicit authorization for any Apple traffic.
+No replay launched; no service, timer, checkpoint or 100 MB ledger
+was changed during this code-only step.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
