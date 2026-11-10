@@ -860,6 +860,19 @@ The command policy does not execute commands or substitute
 for ledger or IPAccounting checks; installer, services, worker
 CLI, and all live Apple access remain unchanged.
 
+**APPLE-SYNC QA RUN #825** verified **825/825 offline tests**
+at `a2d35a5`. The existing uninstalled
+`drive_batch_replay_root_wiring.py` now wraps its injected
+systemd executor with the six-command
+`ReplayCommandPolicy`, enforcing exact allowed argv and
+timeouts **before any injected command callback** is called.
+The policy is bound to one uid, pid and private receipt channel;
+invalid context fails before opening the cumulative ledger.
+**22 new mock-only tests** bring the expected next suite to
+**847, not yet workstation-verified**. No live runner, worker
+CLI activation, new service, Apple traffic, or installer
+changes are involved.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
