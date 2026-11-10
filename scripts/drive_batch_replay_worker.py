@@ -159,6 +159,7 @@ def publish_observation(result: dict, *, directory: Path) -> None:
     }
     if (not isinstance(result, dict) or set(result) != expected
             or type(result['version']) is not int or result['version'] != 1
+            or type(result['outcome']) is not str
             or result['outcome'] not in REPLAY_OUTCOMES
             or any(type(result[field]) is not int for field in counts)
             or not 1 <= result['directory_children_checked'] <= 1_000_000
@@ -192,7 +193,7 @@ def publish_observation(result: dict, *, directory: Path) -> None:
 
 
 def publish_failure(code: str, *, directory: Path) -> None:
-    if code not in REPLAY_FAILURES:
+    if type(code) is not str or code not in REPLAY_FAILURES:
         code = 'REPLAY_LOCAL_FAILURE'
     _write_receipt(directory, {
         'version': 1, 'kind': 'failure', 'code': code,
