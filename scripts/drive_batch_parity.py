@@ -12,6 +12,7 @@ from drive_batch_checkpoint import (BatchCheckpointError,
                                     convert_batch, valid_timestamp)
 from drive_batch_equivalence import (BatchEquivalenceError,
                                      compare_with_legacy)
+from drive_batch_timestamp import classify_modtime
 
 CORE_FIELDS = frozenset(('Path', 'Name', 'Size', 'ModTime', 'IsDir', 'ID'))
 
@@ -69,7 +70,9 @@ def compare_core_fields(
                 if (not valid_timestamp(row['ModTime'])
                         or type(row['ModTime']) is not type(expected['ModTime'])
                         or row['ModTime'] != expected['ModTime']):
-                    raise BatchParityError('BATCH_TIMESTAMP_MISMATCH')
+                    raise BatchParityError(classify_modtime(
+                        expected['ModTime'], row['ModTime'],
+                        is_dir=expected['IsDir']))
                 if any(type(row[key]) is not type(expected[key])
                        or row[key] != expected[key]
                        for key in CORE_FIELDS - {'ModTime'}):
