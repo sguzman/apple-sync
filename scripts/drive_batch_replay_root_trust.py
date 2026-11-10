@@ -34,6 +34,7 @@ ROOT_REPLAY_MODULES = (
     'drive_batch_replay_root_wiring.py',
     'drive_batch_replay_lifecycle.py',
     'drive_batch_replay_root_trust.py',
+    'drive_batch_replay_root_bootstrap.py',
 )
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
