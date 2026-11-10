@@ -707,6 +707,58 @@ and new explicit authorization for any Apple traffic.
 No replay launched; no service, timer, checkpoint or 100 MB ledger
 was changed during this code-only step.
 
+## Uninstalled systemd replay IO adapter (2026-11-10)
+
+The user pulled `c9e2a7d` and verified **573 offline tests
+passed** in 4.122 seconds. This covers the prior pure systemd command
+planner; it does **not** authorize a live replay.
+
+Added `scripts/drive_batch_replay_systemd_adapter.py`: a
+**strictly injected-only** adapter using the existing fixed argv
+planner. It supplies `start_worker()`, `properties()`,
+`stop_worker()`, and `preflight()` methods suitable for **future**
+wiring into the offline-tested `run_accounted` state machine.
+It has no subprocess import, no default executor, no CLI, no root
+service, and no installation step. Tests provide the executor as
+an in-memory fake. The worker named by its arguments still prints
+`REPLAY_WORKER_DORMANT` and cannot run the Apple replay.
+
+Before a worker start, the adapter validates that `/run` and
+`/run/user` are root-owned, non-symlink directories without
+group/world write access; then requires the exact user-owned
+`/run/user/<uid>` and private replay result channel to be
+non-symlink directories of mode 0700. It rejects unexpected
+systemd property lines, missing/duplicate values, or unauthorized
+command arguments, and sanitizes executor exceptions without
+printing stderr or private data. It executes no real commands.
+
+The isolated zero-traffic accounting preflight, when exercised
+by an injected fake executor, has mandatory stop and **post-stop
+counter verification**, even after a start/query failure. Only a
+sample observed as `active/running` and with `IPAccounting=yes`
+and zero ingress/egress, followed by an `inactive/dead` zero-byte
+final observation, passes. The adapter intentionally does
+**not** call `reset-failed` before the accounting controller
+has inspected the final worker counters.
+
+The **22 new offline tests** in
+`tests/test_drive_batch_replay_systemd_adapter.py` cover
+argument binding, private channel trust, symlink rejection,
+strict systemd output, sanitized errors, no shell, zero-traffic
+preflight, failure cleanup and hard refusal to accept residual
+traffic or uncertain stop state. **595 tests are expected**
+(573 previously verified +22), **not yet workstation-verified**.
+
+**Not yet implemented or authorized:** a trusted root entrypoint
+binding this adapter to the `BudgetLedger`, existing backup/timer
+guard and observation-only receipt reader; runtime directory
+creation and per-run lifecycle; a guarded worker entrypoint; and
+manual-only service and Polkit installation. A future full
+offline integration QA must verify these boundaries before
+any live Apple request is even proposed. Existing scanner,
+services, inventory checkpoint, and measured budget remain
+unchanged; no user approval for another live probe was given.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
