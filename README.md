@@ -788,6 +788,17 @@ remains dormant: passing this pure gate is not proof of root
 IPAccounting, shared-ledger reservation or Apple-request
 authorization. No new service or live probe was installed or run.
 
+**APPLE-SYNC QA RUN #685-FIX1** verified **685/685 tests**
+at `19b64e3`. The new dormant
+`drive_batch_replay_worker_preflight.py` validates the actual
+bounded `/proc/self/cgroup`, real/effective UID, exact metered
+unit identity and trusted private runtime directory ownership.
+It does **not** execute the replay or prove root IPAccounting or
+ledger reservation. **20 new offline tests** bring the next
+expected suite to **705 (not yet workstation-verified)**.
+The live replay worker remains disabled and no root service
+has been installed.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
