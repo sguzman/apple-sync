@@ -741,6 +741,18 @@ suite to **595 (not yet workstation-verified)**. Root orchestration,
 worker execution authorization, service installation, and all new
 Apple traffic remain deliberately unavailable.
 
+The user's labeled **QA RUN #595** verified 595/595 offline
+tests at commit `1b1d365`. A new **uninstalled,
+injected-only** root replay wiring layer holds the shared ledger
+context through preflight, reservation, stopped worker counters,
+durable accounting and strict version-1 observation receipt
+validation. **21 new mock-only end-to-end tests** make the
+next expected suite **616, not yet workstation-verified**.
+The layer still has **no default command executor or live CLI**;
+a trusted root entrypoint, guarded worker entrypoint, secure
+volatile channel management and separate permission to install
+or perform an Apple replay remain outstanding.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
