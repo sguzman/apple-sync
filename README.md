@@ -765,6 +765,18 @@ expected total to **638, not yet workstation-verified**.
 No live Apple replay, installation, timer or scanner change
 has been authorized.
 
+**APPLE-SYNC QA RUN #638** confirmed **638/638 offline tests** at
+commit `aac6a7b`. The new uninstalled, injected-only
+`drive_batch_replay_lifecycle.py` connects private-channel
+allocation to root replay wiring. It deletes the channel only
+after a known settled result or a no-traffic defer; **uncertain
+shutdown or ledger accounting preserves evidence** and never
+clears the cumulative budget. **22 new offline tests** make the
+expected next suite **660, not yet workstation-verified**.
+No live worker or root service is installed; a reviewed
+manual-only entrypoint and separate Apple traffic authorization
+are still required.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
