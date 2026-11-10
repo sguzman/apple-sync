@@ -5,6 +5,8 @@ THIS MODULE HAS NO EXECUTABLE ENTRYPOINT AND NO DEFAULT COMMAND EXECUTOR.
 It cannot start systemd/Apple from the CLI. Its only entry function requires
 injected dependencies: a trusted ledger factory, a reviewed shell-free command
 executor, the existing root/timer and backup-idle guards, and a clock.
+Every executor call is checked against the six pinned systemd argv/timeout
+pairs for this uid/pid/receipt directory before reaching injected code.
 
 In production, no user-controlled callback may be accepted. A separate,
 root-owned, manual-only installation and another offline review are needed
@@ -17,6 +19,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import drive_batch_replay_accounting as accounting
+import drive_batch_replay_command_policy as commands
 import drive_batch_replay_systemd_adapter as systemd
 import metered_drive_batch_replay as receipts
 
@@ -45,10 +48,24 @@ def run_wired(*, uid: int, pid: int, receipt_dir: Path,
         if not callable(component):
             raise ReplayWiringError('REPLAY_TRUSTED_DEPENDENCY_MISSING')
     try:
+        # Fix the exact six systemd calls and their timeout budgets before
+        # entering the shared ledger lock or attempting any worker launch.
+        # This adds a second enforcement layer *inside* the root wiring:
+        # future callers cannot accidentally bypass the pure command policy
+        # by supplying a permissive executor. The executor remains injected;
+        # there is still NO live subprocess or default execution path.
+        policy = commands.ReplayCommandPolicy(
+            uid=uid, pid=pid, receipt_dir=receipt_dir)
+
+        def policy_checked_executor(argv: tuple[str, ...],
+                                    timeout: int) -> object:
+            policy.validate(argv, timeout)
+            return execute_argv(argv, timeout)
+
         io = systemd.ReplaySystemdAdapter(
             uid=uid, pid=pid, receipt_dir=receipt_dir,
-            execute_argv=execute_argv)
-    except systemd.ReplayAdapterError:
+            execute_argv=policy_checked_executor)
+    except (systemd.ReplayAdapterError, commands.ReplayCommandPolicyError):
         raise ReplayWiringError('REPLAY_ADAPTER_UNTRUSTED') from None
 
     try:
