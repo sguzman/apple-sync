@@ -12,6 +12,7 @@ from collections.abc import Callable
 from copy import deepcopy
 
 from drive_batch_contract import BatchContractError, plan_batches
+from drive_batch_checkpoint import BatchCheckpointError, convert_batch
 from drive_batch_replay import ReplayError, compare_triplet
 
 REPLAY_REQUESTS = 3
@@ -65,6 +66,14 @@ def run_bracketed(
         except Exception:
             raise ReplayProtocolError('REPLAY_NATIVE_READ_FAILED') from None
         require_idle()
+        # Reject untrusted/partial metadata before issuing another metered
+        # request, rather than spending bandwidth on a doomed replay.
+        try:
+            convert_batch(subset, response)
+        except (BatchCheckpointError, TypeError, ValueError, KeyError,
+                AttributeError):
+            raise ReplayProtocolError(
+                'REPLAY_UNVERIFIED_NATIVE_RESPONSE') from None
         return response
 
     before = request(single)
