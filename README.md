@@ -695,6 +695,16 @@ budget reservation, cgroup termination, IP byte reconciliation and
 receipt verification) remains **unimplemented**. No Apple traffic or live
 replay has been authorized by the code changes.
 
+The dormant replay worker is now **511/511 workstation-test verified**.
+A separate dormant **root-side receipt validator** has been staged. It
+refuses old equivalence receipts, mismatched observational totals,
+private metadata fields, unsafe links and permissions; it does not
+launch any service or account for bandwidth. The 18 associated
+regression tests make **529 expected tests, not yet workstation-verified**.
+The new root-metered execution and ledger orchestration are **still
+unimplemented** and require independent tests and explicit user
+authorization before any additional Apple traffic.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
