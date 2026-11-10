@@ -2,8 +2,10 @@
 """Pure systemd argv plans for an UNINSTALLED iCloud replay worker.
 
 No subprocess, service start, Apple call, ledger operation or live CLI.
-The worker is still DORMANT and ignores --execute. A future root-owned
-wrapper must verify receipt directory ownership, mode, absence of
+The worker is still DORMANT and ignores --execute. The argv only names
+root-owned installed code, never the writable Git checkout; those files
+are not installed by this change. A future root-owned wrapper must verify
+receipt directory ownership, mode, absence of
 symlinks and systemd enforcement BEFORE using any returned argv.
 IPAccounting provides a sampled soft limit, NOT a hard network quota.
 """
@@ -13,11 +15,12 @@ from pathlib import Path
 import re
 
 import drive_batch_replay_accounting as accounting
+import drive_batch_replay_root_trust as root_trust
 import metered_drive_inventory_trial as baseline
 
 USER = baseline.USER
-REPO = baseline.REPO
-WORKER = REPO / 'scripts' / 'drive_batch_replay_worker.py'
+WORKER_ROOT = root_trust.LIBEXEC
+WORKER = WORKER_ROOT / 'drive_batch_replay_worker.py'
 PYTHON = '/usr/bin/python3'
 RUNTIME_SECONDS = accounting.MAX_SECONDS + 10
 CHANNEL_PREFIX = '.apple-sync-replay-'
@@ -92,7 +95,7 @@ def worker_start_argv(unit: str, *, uid: int,
         '--property=IOSchedulingClass=idle',
         '--property=NoNewPrivileges=yes',
         f'--property=User={USER}',
-        f'--property=WorkingDirectory={REPO}',
+        f'--property=WorkingDirectory={WORKER_ROOT}',
         f'--setenv=HOME=/home/{USER}',
         f'--setenv=XDG_RUNTIME_DIR={runtime}',
         '--setenv=DBUS_SESSION_BUS_ADDRESS=unix:path='
@@ -102,7 +105,7 @@ def worker_start_argv(unit: str, *, uid: int,
         f'--setenv=APPLE_SYNC_REPLAY_RECEIPT_DIR={receipt}',
         '--property=StandardOutput=journal',
         '--property=StandardError=journal',
-        PYTHON, str(WORKER), '--execute',
+        PYTHON, '-B', str(WORKER), '--execute',
     )
 
 
