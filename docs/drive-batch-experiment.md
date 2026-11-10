@@ -868,6 +868,54 @@ additional final preflight and lifecycle security review is
 necessary. No Apple traffic, user service changes, checkpoint writes
 or cumulative ledger mutations were performed by this stage.
 
+## Dormant private-channel lifecycle integration (2026-11-10)
+
+The user's labeled **APPLE-SYNC QA RUN #638** fast-forwarded to
+`aac6a7b` and verified **638/638 offline tests passed** in
+**4.631 seconds** (exit 0). This includes the standalone fd-relative
+channel allocator, not the new integration.
+
+Added `scripts/drive_batch_replay_lifecycle.py`, an **uninstalled,
+root-only, injected-only** wrapper around the existing
+`ReplayChannelLease` and `drive_batch_replay_root_wiring.run_wired`.
+It allocates the private channel, retains its descriptors while
+the root metering logic would hold the cumulative budget lock, and
+permits explicit cleanup **only** when the validated wiring returns
+a known completed state (worker stop + counters + ledger settlement)
+or the exact no-traffic/no-worker-launch defer state. Even normal
+error outcomes require fixed schema fields that forbid checkpoint
+writes or claims of production authorization. It never accepts an
+unknown, contradictory, extra-field or malformed result as a safe
+cleanup condition.
+
+If wiring raises (e.g. shutdown unconfirmed, ledger reconciliation
+failed), the lifecycle **preserves the entire receipt directory** and
+closes file descriptors only. This intentionally avoids erasing
+evidence or resetting an unresolved cumulative bandwidth ledger.
+Directory replacement, unexpected children or unsafe receipt metadata
+also block cleanup. The wrapper has no subprocess import or
+executable entrypoint and cannot start Apple traffic without a
+separate trusted root controller supplying immutable callbacks.
+The existing replay worker's live CLI remains dormant.
+
+Added **22** offline regression tests in
+`tests/test_drive_batch_replay_lifecycle.py`, exercising successful
+lease cleanup, settled worker failures, no-traffic deferral,
+failed stop/ledger reconciliation, preservation of private evidence,
+channel replacement and untrusted contents, strict outcome
+allowlists, missing dependencies and root-only invocation.
+The new expected full suite is **660 tests**
+(638 last verified +22), **not yet workstation-verified**.
+
+**Remaining:** A reviewed *non-injected* root-owned, manual-only
+entrypoint binding trusted service operations and the existing
+ledger; the exact disabled-by-default guarded replay worker
+entrypoint; completion of all offline failure-path tests; and
+explicit approval before installing or making any Apple requests.
+No Apple traffic, timers, inventory checkpoint updates or budget
+mutations were made by this development step. The 100 MB cumulative
+budget is **measured**, not a kernel-enforced hard cap.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
