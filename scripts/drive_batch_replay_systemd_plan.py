@@ -120,13 +120,19 @@ def stop_argv(unit: str) -> tuple[str, ...]:
     return ('systemctl', '--system', 'stop', unit)
 
 
-def preflight_start_argv(pid: int) -> tuple[str, ...]:
-    """Only a harmless sleep, for future zero-traffic IP preflight."""
+def preflight_unit_name(pid: int) -> str:
+    """Separate fixed namespace for a zero-traffic accounting preflight."""
     if type(pid) is not int or not 1 <= pid < 2**31:
         raise ReplaySystemdPlanError('REPLAY_PREFLIGHT_UNIT_INVALID')
     unit = f'apple-sync-ipaccounting-replay-check-{pid}.service'
     if not PREFLIGHT_PATTERN.fullmatch(unit):
         raise ReplaySystemdPlanError('REPLAY_PREFLIGHT_UNIT_INVALID')
+    return unit
+
+
+def preflight_start_argv(pid: int) -> tuple[str, ...]:
+    """Only a harmless sleep, for future zero-traffic IP preflight."""
+    unit = preflight_unit_name(pid)
     return (
         'systemd-run', '--system', '--quiet', f'--unit={unit}',
         '--property=Type=exec',
@@ -138,3 +144,17 @@ def preflight_start_argv(pid: int) -> tuple[str, ...]:
         '--property=Restart=no',
         '/usr/bin/sleep', '4',
     )
+
+
+def preflight_properties_argv(pid: int) -> tuple[str, ...]:
+    """Read required IP counters before accepting an accounting preflight."""
+    unit = preflight_unit_name(pid)
+    args = ['systemctl', '--system', 'show', unit]
+    for name in PROPERTY_FIELDS:
+        args.extend(('-p', name))
+    return tuple(args)
+
+
+def preflight_stop_argv(pid: int) -> tuple[str, ...]:
+    """The future root wrapper must stop+verify this unit in a finally."""
+    return ('systemctl', '--system', 'stop', preflight_unit_name(pid))
