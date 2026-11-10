@@ -753,6 +753,18 @@ a trusted root entrypoint, guarded worker entrypoint, secure
 volatile channel management and separate permission to install
 or perform an Apple replay remain outstanding.
 
+**APPLE-SYNC QA RUN #616** verified **616/616 offline tests** at
+commit `52e2819`. A new uninstalled
+`drive_batch_replay_channel.py` adds a root-only, fd-relative
+private receipt-directory lease with exclusive creation,
+strict owner/mode validation, inode checks, and **explicit
+verified-stop-only cleanup**. It cannot invoke the Apple API
+or start a service, and the root entrypoint still is not
+implemented. **22 additional offline tests** bring the next
+expected total to **638, not yet workstation-verified**.
+No live Apple replay, installation, timer or scanner change
+has been authorized.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
