@@ -916,12 +916,53 @@ No Apple traffic, timers, inventory checkpoint updates or budget
 mutations were made by this development step. The 100 MB cumulative
 budget is **measured**, not a kernel-enforced hard cap.
 
+## Exact cgroup identity gate for future replay worker (2026-11-10)
+
+The user's **APPLE-SYNC QA RUN #660** at commit `252695e`
+verified **660/660 offline tests** in **4.634 seconds** with exit 0.
+That verifies the channel-lifecycle wrapper, not this new gate.
+
+Added the **pure, dormant** `scripts/drive_batch_replay_worker_gate.py`.
+Its `check_launch` function accepts only a nonroot worker whose real
+and effective user IDs match, a well-formed systemd `INVOCATION_ID`,
+the replay metering marker, an exact
+`apple-sync-drive-metered-replay-<pid>.service` unit name, and a
+matching single unified cgroup v2 membership under
+`/system.slice/` with no nested groups or extra lines. It also
+checks that the receipt path has the exact
+`/run/user/<uid>/.apple-sync-replay-<token>` shape. The pure
+systemd argv planner now includes
+`APPLE_SYNC_REPLAY_UNIT=<unit>` so the future worker can require
+an exact match to its observed cgroup. **A normal user environment
+variable alone is insufficient**, and the gate never treats it as
+proof of trusted IPAccounting or available cumulative bandwidth.
+
+This is an **identity prerequisite only**: it does not read the live
+`/proc/self/cgroup`, access Apple, open an RC socket, inspect
+permissions, modify a checkpoint, create a service or authorize a
+network request. The replay worker's actual command-line entrypoint
+is **still dormant**. A future worker wrapper must read its
+*actual* proc cgroup, validate the private channel ownership and
+existing saved checkpoint, and execute only inside a separately
+reviewed and approved root-accounted unit. Root must still prove
+the ledger reservation, live IPAccounting, complete cgroup shutdown
+and durable metering **before** any observation receipt is accepted.
+
+Added **25 offline tests** in
+`tests/test_drive_batch_replay_worker_gate.py` covering cgroup
+spoofing, unit mismatch, root/wrong-user refusal, strict private
+channel shape, user.slice and legacy cgroup rejection, malformed
+invocation markers, no IO and no auto-enabled execution path.
+Expected total: **685 tests** (660 verified +25), not yet
+workstation-tested. No Apple traffic, timer, root installation,
+inventory checkpoint or bandwidth ledger change took place.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
 `python3 -m unittest discover -s tests -q` and
 `python3 scripts/drive_metered.py status`. Current expected count is
-**459 tests**; confirm it from the actual workstation output. No Apple
+**685 tests**; confirm it from the actual workstation output. No Apple
 requests or system changes happen in this step.
 
 **Step B — deliberate static installation, only after tests pass.**
