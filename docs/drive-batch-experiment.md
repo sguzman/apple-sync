@@ -556,6 +556,44 @@ reuse the strict probe's `equivalent` receipt or modify the original
 scanner's write path. The new worker's dormant routine alone does not
 establish or enforce IPAccounting.
 
+## Dormant root receipt validation stage (2026-11-10)
+
+The workstation now confirmed **511 offline tests passed** in 4.584
+seconds after updating to commit `9e69f4a`. This confirms the dormant
+worker and replay observation receipt on the user's system, not any
+actual live Apple batch replay.
+
+Added a **separate, dormant, root-side**
+`scripts/metered_drive_batch_replay.py` whose current scope is
+**receipt validation only**, with no systemd, Apple, ledger or CLI
+execution path. It reads a separately created user-owned private
+receipt channel via directory file descriptors and `O_NOFOLLOW`,
+requires exact mode 0700 for the channel and 0600 for the single-link
+regular receipt, limits it to 1024 bytes, and rejects duplicate JSON
+keys. It exclusively accepts **version-1 observation** data whose
+counts add up and agree with one of the four observational outcome
+categories. An old **version-2 equivalence** receipt is always
+rejected. Distinct failure receipts accept only closed, worker-matching
+codes. Any private cloud field or claim of production equivalence
+invalidates the receipt. All failures surface fixed codes.
+
+The **18 new** regression tests in
+`tests/test_metered_drive_batch_replay.py` exercise worker-to-root
+receipt round trips, every observational category, reject/malformed
+paths and types, symlink/hardlink checks, privacy, and allowlist
+agreement. **529 tests are expected** (511 last verified +18),
+**not yet run on the workstation**.
+
+**Important:** This stage does not implement the critical
+cumulative-budget reservation or `systemd-run` controller itself;
+the new root-side module is deliberately dormant. No service
+installation, traffic, Apple account access, checkpoint writes or
+new live probe are authorized. The remaining controller work must
+enforce stop-the-whole-cgroup and measured ledger reconciliation
+**before** calling `read_observation()` or `read_failure()`.
+A separate permissioned manual launcher and explicit approval are
+still required before any live experiment.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
