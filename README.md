@@ -811,6 +811,17 @@ The trusted root-owned controller and worker activation are
 still separate unfinished gates; no live request or service
 installation was performed.
 
+**APPLE-SYNC QA RUN #725** verified **725/725 offline tests**
+at commit `0f44d9e`. The new dormant
+`drive_batch_replay_root_trust.py` verifies the exact
+root-owned `/usr/local/libexec/apple-sync-drive-metered`
+module tree before a future isolated privileged replay bootstrap
+may import it. It rejects unsafe ancestors, symlinks, writable
+files, hardlinked code and missing modules. The **25 new offline
+tests** bring the next expected suite to **750, not yet
+workstation-verified**. The existing installer and services
+are deliberately unchanged; no live replay has been enabled.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
