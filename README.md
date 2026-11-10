@@ -684,6 +684,17 @@ contact Apple by itself. A dedicated metered service, restricted receipt
 contract, checkpoint integrity checks, and **new explicit approval**
 remain prerequisites to any live use.
 
+The 493-test replay-protocol suite has passed on the workstation.
+A new **dormant** `drive_batch_replay_worker.py` now stages pinned binary
+checks, archive locking, checkpoint hashing, backup idleness, and
+version-1 **observation-only** private receipts. Direct invocation cannot
+contact Apple; there is no new systemd unit, launcher or Polkit permission.
+The 18 new offline worker tests bring the expected count to **511, not yet
+workstation-verified**. The independent root-metered controller (durable
+budget reservation, cgroup termination, IP byte reconciliation and
+receipt verification) remains **unimplemented**. No Apple traffic or live
+replay has been authorized by the code changes.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
