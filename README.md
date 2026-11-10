@@ -717,6 +717,18 @@ Apple traffic by itself: no trusted root wrapper, live worker entrypoint,
 manual unit, Polkit permission or timer has been added. Live execution
 still requires explicit authorization after further testing.
 
+The user workstation has now passed **551/551 offline tests**.
+A separate pure `drive_batch_replay_systemd_plan.py` module stages
+fixed systemd command arrays for an IP-accounted replay cgroup,
+stop-and-query operations and an isolated no-traffic sleep preflight.
+It has **no process-launching function, no CLI and no systemd
+installation**. The target worker still has no live execution
+entrypoint; the paths and arguments cannot bypass the existing
+cumulative ledger without a future separately verified privileged
+controller. **22 new offline tests** bring the expected suite to
+**573, not yet workstation-verified**. This release does not authorize
+another Apple probe or enable any timer.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
