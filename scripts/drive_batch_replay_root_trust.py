@@ -20,9 +20,11 @@ import stat
 
 LIBEXEC = Path('/usr/local/libexec/apple-sync-drive-metered')
 
-# Exact root-side imports of replay lifecycle and its dependencies.
-# The worker itself is intentionally NOT copied into this privileged tree:
-# it runs under the regular user's identity in a separate metered cgroup.
+# Two closed allowlists for a future root-owned installation.
+# Even the unprivileged worker MUST load root-owned code, rather than
+# importing from the ordinary user's writable checkout. Root-owned 0644
+# modules can be read and executed by the unprivileged transient worker.
+# Nothing is copied or installed by this module.
 ROOT_REPLAY_MODULES = (
     'drive_meter_budget.py',
     'metered_drive_inventory_trial.py',
@@ -36,6 +38,34 @@ ROOT_REPLAY_MODULES = (
     'drive_batch_replay_root_trust.py',
     'drive_batch_replay_root_bootstrap.py',
 )
+# Complete source-import closure for the dormant, read-only replay worker.
+# The root replay modules above are additional dependencies of its
+# cgroup/channel preflight. Future authorized installation MUST stage and
+# verify both allowlists before worker activation.
+ROOT_WORKER_MODULES = (
+    'drive_batch_replay_worker.py',
+    'drive_batch_replay_worker_entry.py',
+    'drive_batch_replay_worker_preflight.py',
+    'drive_batch_replay_worker_gate.py',
+    'archive_batch.py',
+    'photos_inventory.py',
+    'diagnose_drive_downloads.py',
+    'drive_batch_probe_worker.py',
+    'build_rclone_batch.py',
+    'drive_batch_probe.py',
+    'drive_batch_transport.py',
+    'drive_inventory.py',
+    'drive_inventory_rc.py',
+    'drive_batch_replay_protocol.py',
+    'drive_batch_contract.py',
+    'drive_batch_checkpoint.py',
+    'drive_batch_replay.py',
+    'drive_batch_equivalence.py',
+    'drive_batch_parity.py',
+    'drive_batch_timestamp.py',
+    'drive_pending_id_audit.py',
+)
+
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
 
@@ -114,5 +144,7 @@ def verify_root_installation() -> None:
             parent_fd = fd
         _verify_modules_in_fd(parent_fd, owner=0,
                               modules=ROOT_REPLAY_MODULES)
+        _verify_modules_in_fd(parent_fd, owner=0,
+                              modules=ROOT_WORKER_MODULES)
     finally:
         os.close(parent_fd)
