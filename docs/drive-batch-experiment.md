@@ -759,6 +759,62 @@ any live Apple request is even proposed. Existing scanner,
 services, inventory checkpoint, and measured budget remain
 unchanged; no user approval for another live probe was given.
 
+## Uninstalled end-to-end root replay wiring (2026-11-10)
+
+The user's uniquely labeled **QA RUN #595** fast-forwarded to
+`1b1d365` and verified **595/595 tests passed** in **4.627 seconds**.
+This includes the previous systemd adapter, not the new integration.
+
+Added `scripts/drive_batch_replay_root_wiring.py`, a **nonexecutable,
+injected-only** composition layer. It binds the existing systemd
+adapter, `drive_batch_replay_accounting.run_accounted`, and the
+**actual strict version-1 observation/failure receipt readers**.
+It opens the supplied ledger via a context manager and holds the
+exclusive lock through reservation, worker execution, stop, final
+IP measurement, durable reconciliation, and the receipt read.
+The existing core requires successful preflight before
+`ledger.begin`, stop-confirmed `inactive/dead` state and verified
+IP counters before `ledger.complete`; it leaves the pending
+reservation blocked if stop or reconciliation cannot be trusted.
+All outcomes still forbid checkpoint writes or production batch
+adoption.
+
+The integration **does not provide** a real command executor, real
+`BudgetLedger` factory, root/timer/backup guard, service entrypoint,
+timer, or installation. It accepts these as **explicit test-only
+dependencies**, so the caller could supply unsafe operations;
+it must **not** be treated as a production-ready root controller.
+The target worker still has only the dormant CLI refusal.
+No live Apple requests, unit changes, privilege installation or
+archive writes occurred in this step.
+
+The added **21** mock-driven regression tests in
+`tests/test_drive_batch_replay_root_wiring.py` check receipt
+read ordering, the ledger lock held through receipt validation,
+fixed systemd commands, channel binding, failures of preflight,
+backup guard, worker launch and stop, invalid final IP accounting,
+untrusted receipt schemas, failed ledger commits and missing
+injected dependencies. They do **not** execute subprocesses or
+contact Apple. The next expected suite is **616 tests**
+(595 last verified +21), **not yet tested on the workstation**.
+
+### Outstanding authorization / security gates
+
+- A reviewed root-owned controller entrypoint with an immutable
+  trusted executor, strict root-only invocation and the existing
+  guard/setup; no arbitrary callbacks from unprivileged callers
+- Secure creation and cleanup of the 0700 user-owned volatile
+  receipt channel; handle race/symlink/ownership concerns
+- A separately reviewed worker `--execute` implementation
+  requiring the exact future transient metered unit and receipt
+  channel; no direct user-run Apple request path
+- Complete offline failure-path integration tests and **explicit
+  user approval** to install a manual-only service or run a bounded
+  Apple replay
+
+The soft 1.5 MB sampled cutoff remains **advisory** and may overshoot.
+The ordinary scanner and its 1,420 pending folders are unchanged.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
