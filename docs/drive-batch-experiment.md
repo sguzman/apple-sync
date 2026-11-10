@@ -815,6 +815,59 @@ contact Apple. The next expected suite is **616 tests**
 The soft 1.5 MB sampled cutoff remains **advisory** and may overshoot.
 The ordinary scanner and its 1,420 pending folders are unchanged.
 
+## Dormant fd-relative replay receipt-channel lease (2026-11-10)
+
+The workstation confirmed **APPLE-SYNC QA RUN #616** at commit
+`52e2819`: **616/616 tests passed** in **4.645 seconds** with exit 0.
+This covered the preceding injected-only root wiring stage.
+
+Added `scripts/drive_batch_replay_channel.py`: a separate
+**nonexecutable, root-only** allocator for a private replay receipt
+directory. The root entrypoint (still **unimplemented**) would use
+`allocate_root_channel()`, which opens the fixed
+`/run/user/<uid>` path component-by-component using directory
+file descriptors, `O_NOFOLLOW`, and ownership/permission checks.
+It requires root-owned, non-group-writable ancestors and an exact
+user-owned 0700 runtime directory. Creation is exclusive with a
+random 24-byte URL-safe token, `mkdir(dir_fd=...)`, and
+`fchown`/`fchmod` for a private user-owned 0700 channel.
+All fd-relative creation operations are available separately to
+offline tests through the internal `_create_at_fd` function,
+which does not call Apple or systemd.
+
+The returned `ReplayChannelLease` retains the parent and child
+directory descriptors and the original `st_dev/st_ino` values.
+`close()` only closes descriptors; it **never silently deletes**
+the channel. `cleanup_after_stop(stopped_verified=True)` is an
+explicit separate operation, intended only **after the trusted root
+wrapper has confirmed the worker cgroup has stopped**. A false,
+unknown or truthy-nonboolean confirmation fails closed. Cleanup
+refuses changed inode/symlink/directory-mode references, unexpected
+children, or an untrusted receipt; it removes at most one regular
+0600 single-link `replay.json` and its own empty directory.
+An interrupted/unconfirmed worker intentionally leaves the
+channel intact for later operator reconciliation.
+
+Added **22** offline tests
+(`tests/test_drive_batch_replay_channel.py`) for unique names,
+ownership, modes, verified-stop cleanup, unconfirmed preservation,
+unexpected/symlinked/hardlinked/over-permissive receipts,
+replaced directories, descriptor close behavior, bad IDs, untrusted
+runtime paths, and inert root allocation. Tests use disposable
+temporary runtime directories as an **unprivileged** account; they
+never touch the machine's actual `/run/user` tree. The next
+expected full suite is **638 tests** (616 last verified +22),
+**not yet workstation-verified**.
+
+**Still not approved or implemented:** Wiring the channel lease
+into a real trusted root controller, a guarded live worker entrypoint,
+explicit manual-only unit/policy installation and any Apple replay.
+The runtime path is user-writable by design, so path checks alone
+must not be treated as proof that a live controller is race-free;
+additional final preflight and lifecycle security review is
+necessary. No Apple traffic, user service changes, checkpoint writes
+or cumulative ledger mutations were performed by this stage.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
