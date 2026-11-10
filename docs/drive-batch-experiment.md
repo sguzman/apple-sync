@@ -999,12 +999,60 @@ offline integration QA, and explicit user approval for any
 service installation or live account access. No new live
 probe was performed.
 
+## Dormant guarded replay worker body (2026-11-10)
+
+The user's labeled **QA RUN #705** fast-forwarded to `9b6b861`
+and confirmed **705/705 offline tests passed** in **4.649 seconds**
+with exit 0. This verified the actual-process identity preflight.
+
+Added `scripts/drive_batch_replay_worker_entry.py`, a new
+**non-CLI, detached** worker-side body named `guarded_once()`.
+It first calls the actual-process preflight, which reads its
+`/proc/self/cgroup`, checks the exact transient replay unit and
+nonroot UID, and verifies the private result channel.
+A failure there returns a sanitized nonzero status without
+calling the Apple transport or writing an untrusted receipt.
+Only after that prerequisite passes does the body call the
+existing read-only `replay_once()` exactly once.
+
+A successful, validated bracketed observation is written via
+`publish_observation` to the private 0600 channel. Failure
+paths use `publish_failure` with a strict, fixed code from the
+existing allowlist; unexpected exceptions are converted to
+`REPLAY_LOCAL_FAILURE` without printing account information.
+If the failure receipt cannot be written, the worker still
+returns nonzero, leaving the controller to reject a missing or
+invalid result. Even an exit-zero success merely means an
+**observational receipt was published**; the separate root
+controller must still stop the entire worker cgroup, durably
+commit measured IP traffic, and validate the private receipt.
+No observation authorizes checkpoint writes or metadata
+equivalence.
+
+The original `scripts/drive_batch_replay_worker.py`
+**still prints `REPLAY_WORKER_DORMANT` for every CLI invocation**,
+including `--execute`. The new guarded body is not referenced
+by that CLI or any installed unit, nor is it an Apple traffic
+permission. Actual worker activation remains blocked pending the
+root-owned immutable entrypoint, installation review, full
+offline safety QA and explicit user approval.
+
+Added **20 mock-only tests** in
+`tests/test_drive_batch_replay_worker_entry.py` verifying
+preflight-first behavior, zero calls on failed preflight,
+strict outcome categories, sanitized success/failure output,
+receipt-write failures, missing channels, and the continued
+inert CLI. The expected full suite is **725 tests**
+(705 last verified +20), **not yet workstation-tested**.
+No Apple traffic or service, checkpoint, timer or bandwidth
+ledger changes occurred.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
 `python3 -m unittest discover -s tests -q` and
 `python3 scripts/drive_metered.py status`. Current expected count is
-**705 tests**; confirm it from the actual workstation output. No Apple
+**725 tests**; confirm it from the actual workstation output. No Apple
 requests or system changes happen in this step.
 
 **Step B — deliberate static installation, only after tests pass.**
