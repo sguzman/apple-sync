@@ -304,6 +304,25 @@ class MeteredProbeTests(unittest.TestCase):
                 with self.assertRaises(controller.ProbeMeterError):
                     controller.read_receipt(directory)
 
+    def test_refined_timestamp_failure_code_is_allowed_but_never_success(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            directory.chmod(0o700)
+            receipt = {
+                'version': 2, 'outcome': 'failed',
+                'code': 'PROBE_TIMESTAMP_DIRECTORY_VALUE_MISMATCH',
+                'checkpoint_writes': 0,
+            }
+            path = directory / controller.RECEIPT_NAME
+            path.write_text(json.dumps(receipt))
+            path.chmod(0o600)
+            user = Mock(pw_uid=os.getuid(), pw_gid=os.getgid())
+            with patch.object(controller.pwd, 'getpwnam', return_value=user):
+                self.assertEqual(controller.read_failure_receipt(directory),
+                                 'PROBE_TIMESTAMP_DIRECTORY_VALUE_MISMATCH')
+                with self.assertRaises(controller.ProbeMeterError):
+                    controller.read_receipt(directory)
+
     def test_failure_receipt_rejects_injected_data_or_unsafe_permissions(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
