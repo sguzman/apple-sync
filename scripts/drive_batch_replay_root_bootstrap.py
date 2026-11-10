@@ -60,9 +60,9 @@ def _check_dir(fd: int) -> None:
         raise ReplayBootstrapError('REPLAY_BOOTSTRAP_DIRECTORY_UNTRUSTED')
 
 
-def _check_file(fd: int) -> None:
+def _check_file(fd: int, *, owner: int = 0) -> None:
     info = os.fstat(fd)
-    if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != owner
             or stat.S_IMODE(info.st_mode) & 0o022
             or info.st_nlink != 1 or info.st_size == 0):
         raise ReplayBootstrapError('REPLAY_BOOTSTRAP_CODE_UNTRUSTED')
@@ -83,11 +83,7 @@ def _verify_seed_at_fd(directory_fd: int, *, owner: int = 0) -> None:
         except OSError:
             raise ReplayBootstrapError('REPLAY_BOOTSTRAP_CODE_MISSING') from None
         try:
-            info = os.fstat(fd)
-            if (not stat.S_ISREG(info.st_mode) or info.st_uid != owner
-                    or stat.S_IMODE(info.st_mode) & 0o022
-                    or info.st_nlink != 1 or info.st_size == 0):
-                raise ReplayBootstrapError('REPLAY_BOOTSTRAP_CODE_UNTRUSTED')
+            _check_file(fd, owner=owner)
         finally:
             os.close(fd)
 
