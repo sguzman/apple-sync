@@ -1047,12 +1047,65 @@ inert CLI. The expected full suite is **725 tests**
 No Apple traffic or service, checkpoint, timer or bandwidth
 ledger changes occurred.
 
+## Root-owned replay code trust staging (2026-11-10)
+
+The user's labeled **APPLE-SYNC QA RUN #725** fast-forwarded to
+`0f44d9e` and verified **725/725 tests passed** in **4.151 seconds**
+(exit 0). This verified the detached guarded worker body, not this
+new privileged-code verification stage.
+
+Added `scripts/drive_batch_replay_root_trust.py`, a **read-only,
+uninstalled** verification module intended for the future root
+controller bootstrap. The existing, already approved installer
+uses `/usr/local/libexec/apple-sync-drive-metered` to house
+root-owned controller code, separately from the normal user's
+writable Git checkout. A privileged replay controller **must not
+import replay modules directly from that checkout**.
+
+The new verifier pins an exact list of **10 root-side Python
+modules** needed for the budget ledger, accounting logic, systemd
+adapter, private-channel lease, strict receipt validation and
+lifecycle. It opens each component of the fixed privileged
+directory with fd-relative `O_DIRECTORY|O_NOFOLLOW` checks and
+requires root ownership with no group/world write access.
+It opens each required module by name with `O_NOFOLLOW`, and
+requires a nonempty, regular, single-link, root-owned file
+without group/world write access. Missing files, symlinks,
+changed ownership and unsafe permissions fail closed.
+
+`verify_root_installation()` is **root-only** and currently has
+no CLI, installer hookup or executable replay path. A future
+tiny root-owned bootstrap must start Python in isolated mode
+(`/usr/bin/python3 -I`), perform the minimal trusted bootstrap
+path check **before** importing this module, then verify the
+root-owned code tree prior to adding it to Python's import path.
+The existing installer was **not modified** to copy these modules
+or create a replay service; it still installs only its previously
+approved metered inventory and comparison units.
+
+Added **25 offline tests** in
+`tests/test_drive_batch_replay_root_trust.py` using disposable
+unprivileged temporary module directories to check the same
+file-descriptor verification, hardlink/symlink and permission
+failures, bad filenames and read-only behavior. The expected
+suite is **750 tests** (725 last verified +25), **not yet
+workstation-verified**.
+
+**Remaining security gates:** actual isolated root bootstrap,
+trusted immutable executor and manual-only systemd service
+binding, secure worker code loading, full offline end-to-end
+review, and the user's separate explicit approval for any
+installation or live Apple access. Root-side integrity
+verification alone is neither a network quota nor permission
+to execute the replay. No live Apple call, inventory checkpoint,
+timer, service or budget was touched during this code-only stage.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
 `python3 -m unittest discover -s tests -q` and
 `python3 scripts/drive_metered.py status`. Current expected count is
-**725 tests**; confirm it from the actual workstation output. No Apple
+**750 tests**; confirm it from the actual workstation output. No Apple
 requests or system changes happen in this step.
 
 **Step B — deliberate static installation, only after tests pass.**
