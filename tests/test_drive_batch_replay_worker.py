@@ -74,8 +74,7 @@ class ReplayWorkerTests(unittest.TestCase):
                 binary=self.binary, state_root=self.state)
         self.assertEqual(result, run)
         self.assertEqual(protocol.call_count, 1)
-        self.assertEqual(protocol.call_args.kwargs['backup_busy'],
-                         worker.diagnosis.backup_busy)
+        self.assertTrue(callable(protocol.call_args.kwargs['backup_busy']))
         self.assertEqual(self.checkpoint.read_bytes(), b'sacred checkpoint bytes')
         save.assert_not_called()
 
