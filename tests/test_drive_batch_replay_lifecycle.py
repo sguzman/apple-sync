@@ -218,7 +218,8 @@ class LifecycleTests(unittest.TestCase):
             {'measured_ip_bytes': True},
             {'untrusted': 'private'},
         ):
-            lease = self.lease
+            lease = self._new_lease()
+            self.addCleanup(lease.close)
             sample = settled()
             sample.update(change)
             with self.subTest(change=change), self.assertRaisesRegex(
