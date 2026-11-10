@@ -179,13 +179,34 @@ class ReplaySystemdPlanTests(unittest.TestCase):
         self.assertIn('--property=KillMode=control-group', argv)
         self.assertIn('--property=Restart=no', argv)
         self.assertNotIn(str(plan.WORKER), argv)
+        self.assertEqual(
+            plan.preflight_unit_name(PID),
+            'apple-sync-ipaccounting-replay-check-1234.service')
+        self.assertEqual(
+            plan.preflight_stop_argv(PID),
+            ('systemctl', '--system', 'stop',
+             'apple-sync-ipaccounting-replay-check-1234.service'))
+        self.assertEqual(
+            plan.preflight_properties_argv(PID)[:4],
+            ('systemctl', '--system', 'show',
+             'apple-sync-ipaccounting-replay-check-1234.service'))
+        self.assertEqual(
+            tuple(plan.preflight_properties_argv(PID)[i + 1]
+                  for i, x in enumerate(plan.preflight_properties_argv(PID)[:-1])
+                  if x == '-p'),
+            plan.PROPERTY_FIELDS)
 
     def test_preflight_bad_pid_never_builds_a_command(self):
         for pid in (-1, 0, True, False, 2**31, '1234', None):
-            with self.subTest(pid=pid), self.assertRaisesRegex(
-                    plan.ReplaySystemdPlanError,
-                    'REPLAY_PREFLIGHT_UNIT_INVALID'):
-                plan.preflight_start_argv(pid)
+            for method in (plan.preflight_unit_name,
+                           plan.preflight_start_argv,
+                           plan.preflight_properties_argv,
+                           plan.preflight_stop_argv):
+                with self.subTest(pid=pid, method=method.__name__), \
+                        self.assertRaisesRegex(
+                            plan.ReplaySystemdPlanError,
+                            'REPLAY_PREFLIGHT_UNIT_INVALID'):
+                    method(pid)
 
     def test_pure_module_has_no_execution_entrypoint(self):
         source = Path(plan.__file__).read_text(encoding='utf-8')
