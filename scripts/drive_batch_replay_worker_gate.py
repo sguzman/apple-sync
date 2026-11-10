@@ -56,7 +56,8 @@ def check_launch(*, uid: object, euid: object, environ: Mapping[str, str],
     if (metered != '1' or type(invocation) is not str
             or not INVOCATION.fullmatch(invocation)
             or type(unit) is not str
-            or not plan.accounting.UNIT_PATTERN.fullmatch(unit)):
+            or not plan.accounting.UNIT_PATTERN.fullmatch(unit)
+            or 'APPLE_SYNC_REPLAY_RECEIPT_DIR' not in environ):
         raise ReplayWorkerGateError('REPLAY_WORKER_ENV_UNTRUSTED')
     if (type(cgroup) is not str
             or not 0 < len(cgroup.encode('utf-8', 'ignore')) <= MAX_CGROUP_BYTES):
