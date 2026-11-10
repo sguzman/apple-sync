@@ -50,8 +50,8 @@ class ReplaySystemdPlanTests(unittest.TestCase):
 
     def test_worker_execution_target_remains_dormant(self):
         argv = start()
-        self.assertEqual(argv[-4:], (
-            '/usr/bin/python3', '-B',
+        self.assertEqual(argv[-6:], (
+            '/usr/bin/python3', '-E', '-s', '-B',
             '/usr/local/libexec/apple-sync-drive-metered/drive_batch_replay_worker.py',
             '--execute'))
         self.assertNotIn('/home/sguzman/Code/Sync/apple-sync',
