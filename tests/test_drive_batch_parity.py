@@ -54,14 +54,36 @@ class CoreParityTests(unittest.TestCase):
     def test_one_nanosecond_difference_fails_closed(self):
         legacy = references()
         legacy[0][1][0]['ModTime'] = '2026-11-09T11:50:00.123456788Z'
-        with self.assertRaisesRegex(parity.BatchParityError, 'TIMESTAMP_MISMATCH'):
+        with self.assertRaisesRegex(parity.BatchParityError, 'TIMESTAMP_SUBSECOND_MISMATCH'):
             parity.compare_core_fields(REQUEST, response(), legacy)
 
     def test_equivalent_time_with_different_timezone_still_needs_review(self):
         legacy = references()
         legacy[0][1][1]['ModTime'] = '2026-11-09T05:50:00.123456789-06:00'
-        with self.assertRaisesRegex(parity.BatchParityError, 'TIMESTAMP_MISMATCH'):
+        with self.assertRaisesRegex(parity.BatchParityError, 'TIMESTAMP_REPRESENTATION_MISMATCH'):
             parity.compare_core_fields(REQUEST, response(), legacy)
+
+    def test_different_file_modtime_seconds_remain_a_failure(self):
+        legacy = references()
+        legacy[0][1][0]['ModTime'] = '2026-11-09T11:50:01.123456789Z'
+        with self.assertRaisesRegex(
+                parity.BatchParityError, 'TIMESTAMP_FILE_VALUE_MISMATCH'):
+            parity.compare_core_fields(REQUEST, response(), legacy)
+
+    def test_different_directory_modtime_seconds_remain_a_failure(self):
+        legacy = references()
+        legacy[0][1][1]['ModTime'] = '2026-11-09T11:49:59.123456789Z'
+        with self.assertRaisesRegex(
+                parity.BatchParityError, 'TIMESTAMP_DIRECTORY_VALUE_MISMATCH'):
+            parity.compare_core_fields(REQUEST, response(), legacy)
+
+    def test_invalid_reference_timestamp_has_no_raw_value_in_failure(self):
+        legacy = references()
+        legacy[0][1][0]['ModTime'] = 'Private-account-token'
+        with self.assertRaisesRegex(
+                parity.BatchParityError, 'TIMESTAMP_UNVERIFIED') as caught:
+            parity.compare_core_fields(REQUEST, response(), legacy)
+        self.assertNotIn('Private-account-token', str(caught.exception))
 
     def test_missing_modtime_or_name_is_rejected(self):
         for field in ('ModTime', 'Name', 'Size', 'Path', 'IsDir', 'ID'):
