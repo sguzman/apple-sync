@@ -656,6 +656,24 @@ bring the expected count to 459, not yet workstation-verified.**
 No new Apple request, production scanner migration, service reinstall or
 inventory checkpoint write is authorized by this change.
 
+A fourth strict metered probe on November 10 isolated a **whole-second
+directory modification-time mismatch**, not merely formatting or
+subsecond precision. It used **227,110 accounted bytes** and left the
+exclusive ledger at **72 passes, 47,592,221 bytes remaining**; the saved
+inventory stayed at 1,606 complete / 1,420 pending folders. The pinned
+rclone v1.75.2 directory list uses Apple's `DateModified` field, so the
+cause remains unresolved.
+
+An isolated `drive_batch_replay.py` module now compares **single-before /
+two-folder-batch / single-after** metadata entirely in memory, including
+fail-closed identity/ETag checks. It reports only anonymous observational
+categories (stable, batch-only difference, between-single-read difference,
+mixed), **not** a verdict that Apple or rclone is buggy. Sixteen additional
+offline tests bring the **expected** suite count from the last verified
+459 to **475, not yet host-verified**. No account requests, scanner
+migration, checkpoint writes or new metered services were performed.
+A future live replay needs separate explicit authorization and safety tests.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
