@@ -822,6 +822,17 @@ tests** bring the next expected suite to **750, not yet
 workstation-verified**. The existing installer and services
 are deliberately unchanged; no live replay has been enabled.
 
+**APPLE-SYNC QA RUN #750** verified **750/750 offline tests**
+at commit `853399b`. The new **uninstalled, diagnostic-only**
+`drive_batch_replay_root_bootstrap.py` accepts only `doctor`
+and refuses all execution actions. It requires isolated Python,
+the fixed root-owned install path, safe bootstrap/verifier files
+and subsequent 11-module root-code verification. The existing
+installer, services, Polkit rules and replay worker CLI remain
+unchanged; no Apple traffic or privileged installation occurred.
+**27 new offline tests** bring the next expected full suite to
+**777, not yet workstation-verified**.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
