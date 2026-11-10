@@ -360,7 +360,50 @@ to exercise the classifier.
 the last **436-test workstation-confirmed result**. The expected suite
 count is **459**. The new tests and code have **not been executed on the
 workstation**, and the updated controller is **not installed**.
-First run the ordinary offline suite; no live probe or reinstall yet.
+Historical note: the 459-test offline suite subsequently passed on the workstation, and its updated manual-only launcher was installed without enabling a timer.
+
+## Strict probe #5: directory UTC second mismatch (2026-11-10)
+
+The user explicitly authorized one more *manual-only* metered comparison,
+and the installed 459-test diagnostic version reported
+`PROBE_FAILED: PROBE_TIMESTAMP_DIRECTORY_VALUE_MISMATCH` in its system
+journal. This specifically means the native and reference **directory**
+`ModTime` values, once independently parsed into UTC, differed by one or
+more **whole seconds**; it is **not** a timezone or fractional formatting
+difference. This code does *not* reveal the raw timestamps, which folder
+changed, the magnitude of the offset, or why it happened.
+
+Measured IP traffic was **177,662 ingress + 49,448 egress = 227,110 bytes**.
+The cumulative ledger reconciled to **72 completed passes, 52,407,779 bytes
+used, 47,592,221 bytes remaining, pending=no**. The saved Drive checkpoint
+remains **1,606 folders complete, 1,420 pending, 10,455 records**. The
+start-of-run ledger was at pass 71, not 70; this log does **not** identify
+the intervening pass. The batch experiment did **not** write checkpoints
+or advance inventory.
+
+### Pinned rclone source-level finding (v1.75.2)
+
+Read upstream `backend/iclouddrive/iclouddrive.go` and
+`backend/iclouddrive/api/drive.go` **at tag v1.75.2**. Its ordinary
+`Fs.List` explicitly constructs directory records with
+`fs.NewDir(remote, item.DateModified)`. Its `listAll` calls
+`GetItemByDriveID(ctx, id, true)`, which is a wrapper around
+`GetItemsByDriveID(ctx, []string{id}, true)`. That uses the
+`/retrieveItemDetailsInFolders` API endpoint. Our experimental Go adapter
+calls `GetItemsByDriveID(ctx, arg, true)` and serializes each child's
+`DateModified`, so it does **not** intentionally source directory
+timestamps from an entirely different Apple field or endpoint.
+
+The remaining hypotheses include a directory timestamp changing between
+the sequential Apple requests, server behavior that differs for one versus
+multiple folder IDs, or another response-level inconsistency. **None is
+proven.** Do not normalize away whole-second discrepancies or mark directory
+parity verified; do not automatically run the live probe again. To
+distinguish these cases, first design an offline replay experiment and
+a separately authorized, bounded comparison of a repeated single-folder
+read versus batched reads, ensuring all traffic is metered and results
+remain private. Until then retain the original one-folder scanner and
+the batch write gate closed.
 
 ## Local acceptance sequence (no full scanner resume)
 
