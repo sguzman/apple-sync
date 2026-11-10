@@ -833,6 +833,20 @@ unchanged; no Apple traffic or privileged installation occurred.
 **27 new offline tests** bring the next expected full suite to
 **777, not yet workstation-verified**.
 
+**APPLE-SYNC QA RUN #777** verified **777/777 offline tests**
+at commit `6d5db43`. A new security review corrected the
+dormant systemd replay plan so its unprivileged worker targets
+root-owned `/usr/local/libexec/apple-sync-drive-metered`,
+**not the user-writable Git checkout**. The Python worker plan
+uses `-E -s -B` to exclude user-controlled Python options,
+user-site imports and bytecode writes. The existing read-only
+root verifier now checks **both** the 11-module controller
+allowlist and a 21-module worker dependency allowlist.
+**18 new offline tests** bring the expected suite to
+**795, not yet workstation-verified**. The real installer,
+Polkit permissions, units and all live Apple access are
+unchanged; the worker CLI is still dormant.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
