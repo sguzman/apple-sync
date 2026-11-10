@@ -316,12 +316,58 @@ reinstall the root-owned manual service. Do not start any additional live
 comparison without a new decision that the diagnostic value justifies
 its metered Apple traffic.
 
+## Strict probe #4: exact timestamp mismatch diagnosed (2026-11-09)
+
+The subsequent manually authorized metered probe did report its private
+failure category: `PROBE_TIMESTAMP_MISMATCH`. It read no file bodies,
+advanced no checkpoint and consumed **177,763 ingress + 50,507 egress =
+228,270 accounted bytes**. The exclusive cumulative ledger now reports
+**70 passes, 52,180,669 bytes used, 47,819,331 bytes remaining, pending=no**;
+the last verified inventory is still **1,606 completed, 1,420 pending,
+10,455 records**. Do not interpret this code as proof of different
+physical modification times: the strict gate compared RFC3339 strings
+without normalizing offset or fractional representation. It did establish
+that these serialized values were **not exactly equal**.
+
+The recent, initially malformed classifier edit was discarded and the
+previously workstation-verified parity module restored. A clean, separate
+`scripts/drive_batch_timestamp.py` now classifies timestamps entirely
+offline using integral UTC seconds and all **nine decimal fractional digits**.
+Its fixed categories distinguish:
+- Same UTC instant, different timestamp representations (time zone/zero
+  padding)
+- Different nanoseconds within the same UTC second
+- Different whole seconds for a file vs. for a directory
+- Invalid or unparseable metadata
+
+The `drive_batch_parity` validator now uses this classifier **only to
+produce a fixed failure reason**. Even a formatting-only mismatch still
+fails strict validation. The worker and root controller have matching
+allowlists for all new codes; private receipts remain mode-0600,
+version-2, failure-only on nonzero exit, and are examined only after IP
+bytes are durably accounted for. No real Apple responses, paths or
+timestamps are recorded in logs or receipts. No production checkpoint
+write path is enabled.
+
+**Critical limit:** raw timestamp pairs from the previous live probes
+were not saved for privacy. The new classifier cannot retroactively
+tell which category caused the earlier `PROBE_TIMESTAMP_MISMATCH`.
+It requires paired metadata supplied to it in a future separately
+authorized, metered comparison; do not make another live request merely
+to exercise the classifier.
+
+**Offline verification:** 23 more regression tests were added since
+the last **436-test workstation-confirmed result**. The expected suite
+count is **459**. The new tests and code have **not been executed on the
+workstation**, and the updated controller is **not installed**.
+First run the ordinary offline suite; no live probe or reinstall yet.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
 `python3 -m unittest discover -s tests -q` and
 `python3 scripts/drive_metered.py status`. Current expected count is
-**436 tests**; confirm it from the actual workstation output. No Apple
+**459 tests**; confirm it from the actual workstation output. No Apple
 requests or system changes happen in this step.
 
 **Step B — deliberate static installation, only after tests pass.**
