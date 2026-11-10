@@ -50,10 +50,12 @@ class ReplaySystemdPlanTests(unittest.TestCase):
 
     def test_worker_execution_target_remains_dormant(self):
         argv = start()
-        self.assertEqual(argv[-3:], (
-            '/usr/bin/python3',
-            '/home/sguzman/Code/Sync/apple-sync/scripts/drive_batch_replay_worker.py',
+        self.assertEqual(argv[-4:], (
+            '/usr/bin/python3', '-B',
+            '/usr/local/libexec/apple-sync-drive-metered/drive_batch_replay_worker.py',
             '--execute'))
+        self.assertNotIn('/home/sguzman/Code/Sync/apple-sync',
+                         ' '.join(argv))
         self.assertTrue(
             Path(worker.__file__).name == 'drive_batch_replay_worker.py')
         # Worker ignores arguments and prints the dormant refusal; this
@@ -218,7 +220,7 @@ class ReplaySystemdPlanTests(unittest.TestCase):
     def test_only_fixed_user_and_working_directory(self):
         argv = start()
         self.assertIn(
-            '--property=WorkingDirectory=/home/sguzman/Code/Sync/apple-sync',
+            '--property=WorkingDirectory=/usr/local/libexec/apple-sync-drive-metered',
             argv)
         self.assertEqual(sum(x.startswith('--property=User=') for x in argv), 1)
         self.assertFalse(any('EnvironmentFile=' in x for x in argv))
