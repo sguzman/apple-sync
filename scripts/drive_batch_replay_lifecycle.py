@@ -19,6 +19,7 @@ from pathlib import Path
 
 import drive_batch_replay_channel as channels
 import drive_batch_replay_root_wiring as wiring
+import metered_drive_batch_replay as receipts
 
 # Only these states are returned after a fully stopped, IP-accounted worker
 # and durable budget settlement by the tested run_accounted state machine.
@@ -63,13 +64,12 @@ def _cleanup_eligible(result: object) -> bool:
         fields |= {'outcome'}
         if (type(result.get('outcome')) is not str or
                 result['outcome'] not in
-                __import__('metered_drive_batch_replay').OBSERVATION_OUTCOMES):
+                receipts.OBSERVATION_OUTCOMES):
             return False
     if status == 'REPLAY_WORKER_FAILED':
         fields |= {'code'}
-        from metered_drive_batch_replay import FAILURE_CODES
         if (type(result.get('code')) is not str
-                or result['code'] not in FAILURE_CODES):
+                or result['code'] not in receipts.FAILURE_CODES):
             return False
     return set(result) == fields
 
