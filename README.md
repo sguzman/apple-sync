@@ -729,6 +729,18 @@ controller. **22 new offline tests** bring the expected suite to
 **573, not yet workstation-verified**. This release does not authorize
 another Apple probe or enable any timer.
 
+The user workstation has now passed **573/573 offline tests**.
+An injected-only `drive_batch_replay_systemd_adapter.py` now
+checks private runtime channel ownership/modes, builds only the
+previously approved argv, validates fixed systemd status fields,
+and requires zero-traffic preflight **shutdown plus final counter
+verification**. Its executor is **always injected**; it has no
+live CLI or subprocess call, and the replay worker it names remains
+inert. **22 new offline adapter tests** bring the expected full
+suite to **595 (not yet workstation-verified)**. Root orchestration,
+worker execution authorization, service installation, and all new
+Apple traffic remain deliberately unavailable.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
