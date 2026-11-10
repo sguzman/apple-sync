@@ -1150,12 +1150,64 @@ and explicit user approval before any installation or Apple network
 request. The cumulative IP budget remains an advisory, measured
 limit rather than a kernel-enforced hard cap.
 
+## Dormant replay worker uses only proposed root-owned code (2026-11-10)
+
+The user's **APPLE-SYNC QA RUN #777** at commit `6d5db43` verified
+**777/777 offline tests** in **4.154 seconds** (exit 0). This confirms
+the prior isolated `doctor` bootstrap, **not** this new worker path
+hardening.
+
+Security review found that the **inert systemd argv planner still
+named the user-writable Git checkout as the worker executable path
+and working directory**. Even though that worker CLI stayed dormant,
+reusing those argv during future activation would have allowed
+user-edited Python code into a system-accounted execution path.
+The planner now pins the worker script and working directory to
+`/usr/local/libexec/apple-sync-drive-metered`, the same protected
+location intended for trusted root controller code.
+
+The planned unprivileged Python worker is invoked with `-E -s -B`:
+ignore `PYTHON*` environment options, disable user-site packages,
+and avoid writing bytecode into the root-owned code directory.
+The worker remains unprivileged (`User=sguzman`) in its
+transient `IPAccounting=yes` system service. It still points at the
+original **dormant** `drive_batch_replay_worker.py --execute` CLI,
+which does **not** perform a replay.
+
+The root code verifier now has two separate allowlists: **11
+root-controller modules** and **21 worker/dependency modules**
+covering the replay worker, the guarded body, cgroup preflight,
+native transport, checkpoint-read and archive-lock dependencies.
+It checks **both** sets for regular, non-symlinked, single-link,
+root-owned, non-group/world-writable files before approving
+a future read-only diagnostic. Both sets are required to pass.
+This does not copy any module, authorize the `--execute` handler,
+or make a command executor available. Existing installer, Polkit,
+units and timers remain unchanged.
+
+Added **18 new offline tests** in
+`tests/test_drive_batch_replay_protected_worker.py`, including
+closed local import dependencies, fixed worker arguments,
+no user checkout or package injection, dormant worker CLI,
+symlinks/hardlinks, file-mode and manifest failures, and
+non-installation by the existing installer. Updated existing
+systemd planner assertions without changing their test count.
+The **next expected suite is 795 tests** (777 last verified +18);
+this new stage has **not** been workstation-verified.
+
+**Next gates:** complete manual-only root-owned installation
+packaging, immutable executor/root controller binding, guarded
+worker entrypoint, full failure-path QA, and explicit separate
+approval before any Apple traffic or service installation.
+The measured 100 MB ledger remains a sampled advisory budget;
+a hard network byte cap has not been implemented.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
 `python3 -m unittest discover -s tests -q` and
 `python3 scripts/drive_metered.py status`. Current expected count is
-**777 tests**; confirm it from the actual workstation output. No Apple
+**795 tests**; confirm it from the actual workstation output. No Apple
 requests or system changes happen in this step.
 
 **Step B — deliberate static installation, only after tests pass.**
