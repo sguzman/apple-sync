@@ -1247,12 +1247,59 @@ controller plus explicit user approval for installation and
 network access. The 100 MB ledger remains a measured, sampled
 advisory limit rather than a hard quota.
 
+## Command policy enforced inside injected root wiring (2026-11-10)
+
+The user's labeled **APPLE-SYNC QA RUN #825** fast-forwarded to
+`a2d35a5` and verified **825/825 offline tests passed**, in
+**4.717 seconds** (exit 0). This verifies the pure command
+allowlist but **not** the new integration.
+
+Previously `drive_batch_replay_root_wiring.run_wired` accepted
+a caller-injected command executor directly. Although its
+systemd adapter generated fixed command shapes, it did **not**
+enforce the six-command allowlist immediately before calling
+that executor. Root wiring now constructs
+`ReplayCommandPolicy(uid,pid,receipt_dir)` before acquiring
+the shared budget ledger and passes a locally wrapped executor
+into `ReplaySystemdAdapter`. Each attempted command is checked
+against the **exact tuple and timeout** first; anything else
+fails closed before invoking the supplied executor. The policy
+is fixed to the same immutable uid/pid/channel context as the
+systemd adapter. Invalid context is refused before ledger
+access. This is a second command-authority boundary; it does
+**not** change the existing accounting state machine.
+
+Added **22 new mock-only tests** in
+`tests/test_drive_batch_replay_policy_wiring.py`. These verify
+all six permitted operations pass, adapter-mediated start,
+status, stop and zero-traffic preflight use the checked callback,
+and foreign units, shell commands, `systemctl enable`,
+`daemon-reload`, changed executable/receipt path, extra
+systemd properties and invalid timeouts never reach the injected
+executor. The tests also verify unsafe accounting results and
+private backend exceptions are refused without exposure.
+
+**Next expected suite: 847 tests** (825 last verified +22);
+this stage has **not yet been tested on the workstation**.
+
+This remains a deliberately **uninstalled, injection-only**
+composition: there is no production command runner, no
+root-owned manual service for replay, no live Apple invocation,
+and the replay worker CLI still refuses `--execute`.
+The existing one-pass scanner, probe, other services, timers,
+archive, checkpoint and cumulative metering ledger were not
+changed. Before any approved live diagnostic, the future
+controller still needs its trusted root-owned command runner
+with restricted environment, checked code tree and complete
+failure-path validation. The 100 MB limit is measured,
+not kernel-enforced.
+
 ## Local acceptance sequence (no full scanner resume)
 
 **Step A — offline tests only.** After pulling the current branch, run
 `python3 -m unittest discover -s tests -q` and
 `python3 scripts/drive_metered.py status`. Current expected count is
-**825 tests**; confirm it from the actual workstation output. No Apple
+**847 tests**; confirm it from the actual workstation output. No Apple
 requests or system changes happen in this step.
 
 **Step B — deliberate static installation, only after tests pass.**
