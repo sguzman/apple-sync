@@ -16,10 +16,12 @@ dormant. An observational result never authorizes checkpoint writes.
 from __future__ import annotations
 
 from collections.abc import Callable
+import os
 from pathlib import Path
 
 import drive_batch_replay_accounting as accounting
 import drive_batch_replay_command_policy as commands
+import drive_batch_replay_root_executor as executor
 import drive_batch_replay_systemd_adapter as systemd
 import metered_drive_batch_replay as receipts
 
@@ -99,3 +101,36 @@ def run_wired(*, uid: int, pid: int, receipt_dir: Path,
             or result.get('checkpoint_writes') != 0):
         raise ReplayWiringError('REPLAY_RESULT_NOT_READ_ONLY')
     return result
+
+def run_wired_with_transport(*, uid: int, pid: int,
+                             receipt_dir: Path,
+                             ledger_factory: Callable[[], object],
+                             invoke: Callable[[tuple[str, ...], int, dict[str, str]], object],
+                             guard_setup: Callable[[], None],
+                             idle_window: Callable[[], bool],
+                             monotonic: Callable[[], float],
+                             sleep: Callable[[float], None]) -> dict:
+    """OFFLINE-INJECTED facade + root accounting integration.
+
+    No default runner: the caller must explicitly supply `invoke`. This
+    helper must NOT be exposed from a root CLI, service or public API until a
+    separately reviewed bounded subprocess implementation and installation
+    are approved. Testing uses a fake invocation callback only.
+
+    Verify real EUID before allocating or opening the ledger. Exact argv,
+    timeouts, fixed env and absolute binary paths are enforced by the
+    transport facade; root wiring independently checks the six-command
+    allowlist a second time.
+    """
+    if os.geteuid() != 0:
+        raise ReplayWiringError('REPLAY_ROOT_SERVICE_REQUIRED')
+    try:
+        boundary = executor.ReplayExecutorBoundary(
+            uid=uid, pid=pid, receipt_dir=receipt_dir, invoke=invoke)
+    except executor.ReplayExecutorError:
+        raise ReplayWiringError('REPLAY_EXECUTOR_BOUNDARY_UNTRUSTED') from None
+    return run_wired(
+        uid=uid, pid=pid, receipt_dir=receipt_dir,
+        ledger_factory=ledger_factory, execute_argv=boundary,
+        guard_setup=guard_setup, idle_window=idle_window,
+        monotonic=monotonic, sleep=sleep)
