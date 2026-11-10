@@ -847,6 +847,19 @@ allowlist and a 21-module worker dependency allowlist.
 Polkit permissions, units and all live Apple access are
 unchanged; the worker CLI is still dormant.
 
+**APPLE-SYNC QA RUN #795** verified **795/795 offline tests**
+at `eac94c6`. The new, detached
+`drive_batch_replay_command_policy.py` validates exactly six
+fixed transient systemd commands and timeouts for one future
+metered replay context, refusing any other root command,
+unit, altered binary or shell invocation. The root-owned
+code manifest now requires **12 controller modules** and
+**21 worker modules**. **30 new mock-only tests** bring the
+next expected full suite to **825, not yet workstation-verified**.
+The command policy does not execute commands or substitute
+for ledger or IPAccounting checks; installer, services, worker
+CLI, and all live Apple access remain unchanged.
+
 See [the batch experiment engineering plan](docs/drive-batch-experiment.md)
 and [build recovery notes](docs/drive-batch-experiment.md#recovery-after-interrupted-builds-2026-11-08).
 The initial build verification bugs (release version suffix and custom Go
